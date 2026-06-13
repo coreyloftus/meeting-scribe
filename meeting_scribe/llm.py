@@ -8,6 +8,8 @@ code.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 
 from .config import Config
 
@@ -32,6 +34,37 @@ def _text(message) -> str:
     return "".join(b.text for b in message.content if b.type == "text").strip()
 
 
+def _generate(cfg: Config, prompt: str, max_tokens: int) -> str:
+    """Dispatch to the configured backend: the Anthropic API, or the local
+    `claude` CLI (Claude Code) which runs against whatever it's logged in with."""
+    if cfg.llm_backend == "claude_cli":
+        return _generate_cli(cfg, prompt)
+    msg = _client(cfg).messages.create(
+        model=cfg.model,
+        max_tokens=max_tokens,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return _text(msg)
+
+
+def _generate_cli(cfg: Config, prompt: str) -> str:
+    exe = shutil.which(cfg.claude_cli) or cfg.claude_cli
+    cmd = [exe, "-p"]
+    if cfg.model:
+        cmd += ["--model", cfg.model]
+    try:
+        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=600)
+    except FileNotFoundError as e:
+        raise LLMError(
+            f"`{cfg.claude_cli}` not found. Install Claude Code, or set anthropic.backend "
+            f"to 'api'.") from e
+    except subprocess.TimeoutExpired as e:
+        raise LLMError("claude CLI timed out after 600s.") from e
+    if r.returncode != 0:
+        raise LLMError(f"claude CLI failed: {(r.stderr or r.stdout)[:300]}")
+    return r.stdout.strip()
+
+
 def slugify(text: str) -> str:
     text = text.lower()
     text = re.sub(r"[^a-z0-9]+", "-", text)
@@ -41,25 +74,14 @@ def slugify(text: str) -> str:
 
 def make_slug(cfg: Config, transcript: str) -> str:
     """Short kebab-case topic slug for filenames/titles."""
-    client = _client(cfg)
     prompt = cfg.slug_prompt or (
         "Generate a short 2-4 word lowercase hyphenated slug for this meeting.")
-    msg = client.messages.create(
-        model=cfg.model,
-        max_tokens=64,
-        messages=[{"role": "user", "content": f"{prompt}\n\nTranscript (first 2000 chars):\n{transcript[:2000]}"}],
-    )
-    return slugify(_text(msg))
+    out = _generate(cfg, f"{prompt}\n\nTranscript (first 2000 chars):\n{transcript[:2000]}", max_tokens=64)
+    return slugify(out)
 
 
 def summarize(cfg: Config, transcript: str) -> str:
     """Markdown summary with action items, decisions, and takeaways."""
-    client = _client(cfg)
     prompt = cfg.summary_prompt or (
         "Summarize this meeting transcript into Action Items, Key Decisions, and Key Takeaways in markdown.")
-    msg = client.messages.create(
-        model=cfg.model,
-        max_tokens=cfg.max_tokens,
-        messages=[{"role": "user", "content": f"{prompt}\n\nTranscript:\n\n{transcript}"}],
-    )
-    return _text(msg)
+    return _generate(cfg, f"{prompt}\n\nTranscript:\n\n{transcript}", max_tokens=cfg.max_tokens)

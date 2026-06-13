@@ -70,6 +70,17 @@ class Config:
 
     # --- anthropic ----------------------------------------------------------
     @property
+    def llm_backend(self) -> str:
+        """'api' (Anthropic API key, pay-as-you-go) or 'claude_cli' (local
+        `claude` CLI / Claude Code — uses whatever it's logged in with, e.g. a
+        Pro/Max subscription)."""
+        return self.get("anthropic", "backend", default="api")
+
+    @property
+    def claude_cli(self) -> str:
+        return self.get("anthropic", "claude_cli", default="claude")
+
+    @property
     def anthropic_key(self) -> str:
         return os.environ.get("ANTHROPIC_API_KEY") or self.get("anthropic", "api_key", default="") or ""
 

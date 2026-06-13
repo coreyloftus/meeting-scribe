@@ -16,20 +16,6 @@ automatically into Notion and/or a local markdown vault.
 
 ---
 
-## Why the old version sounded "underwater"
-
-The previous version captured the mic and system audio as two `avfoundation`
-inputs at **different sample rates** (system at 48 kHz, the AirPods mic at 24 kHz)
-and fed them into ffmpeg's `join` filter — which does **not** resample. The 48 kHz
-system stream got clocked at 24 kHz and played back at **half speed, an octave
-low**: the classic underwater/slow-motion artifact.
-
-meeting-scribe captures the two sources to **separate files** and resamples each
-one **independently** to 16 kHz before transcription. The streams are never joined
-at mismatched rates, so the bug cannot recur. (See `meeting_scribe/audio.py`.)
-
----
-
 ## How it works
 
 ```
@@ -127,7 +113,9 @@ the file **or** in the environment (`ANTHROPIC_API_KEY`, `NOTION_TOKEN` — env 
 ```jsonc
 {
   "anthropic": {
-    "api_key": "",                       // or set ANTHROPIC_API_KEY
+    "backend": "api",                    // "api" (key) or "claude_cli" (local Claude Code)
+    "api_key": "",                       // or set ANTHROPIC_API_KEY  (backend "api" only)
+    "claude_cli": "claude",              // command to run            (backend "claude_cli" only)
     "model": "claude-haiku-4-5-20251001",// haiku = cheap/fast; sonnet/opus = higher quality
     "max_tokens": 4096
   },
@@ -157,6 +145,21 @@ the file **or** in the environment (`ANTHROPIC_API_KEY`, `NOTION_TOKEN` — env 
   }
 }
 ```
+
+### Which Claude backend? (billing)
+
+`anthropic.backend` chooses how the summary is generated:
+
+- **`"api"`** — calls the Anthropic API with `anthropic.api_key` (or `ANTHROPIC_API_KEY`).
+  Billed as **pay-as-you-go API usage** at console.anthropic.com, separate from any
+  Claude.ai subscription. This is the portable option — anyone with a key can run it.
+- **`"claude_cli"`** — shells out to your local **`claude`** command (Claude Code) with
+  `claude -p`. It runs against **whatever that CLI is logged in with** — so if you're
+  signed into Claude Code on a Pro/Max plan, this uses your **subscription** instead of
+  API credits, and no API key is needed. For this backend, set `model` to a Claude Code
+  alias (`haiku`, `sonnet`, `opus`) or a full model ID.
+
+Either way, only the text transcript is sent to Claude — never the audio.
 
 ### Notion setup
 

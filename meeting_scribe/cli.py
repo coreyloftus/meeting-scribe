@@ -121,8 +121,13 @@ def cmd_doctor(args) -> int:
     print(f"  {_ok(model_ok)} whisper model: {model or '(unset)'}")
 
     print(f"  {_ok(bool(cfg.source))} config file: {cfg.source or '(using defaults only)'}")
-    print(f"  {_ok(bool(cfg.anthropic_key))} Anthropic API key: "
-          f"{'set' if cfg.anthropic_key else 'MISSING (set ANTHROPIC_API_KEY or anthropic.api_key)'}")
+    if cfg.llm_backend == "claude_cli":
+        cli = shutil.which(cfg.claude_cli)
+        print(f"  {_ok(bool(cli))} LLM backend: claude_cli (uses your Claude Code login/subscription)")
+        print(f"    {_ok(bool(cli))} `{cfg.claude_cli}`: {cli or 'NOT FOUND on PATH'}")
+    else:
+        print(f"  {_ok(bool(cfg.anthropic_key))} LLM backend: api — Anthropic API key "
+              f"{'set' if cfg.anthropic_key else 'MISSING (set ANTHROPIC_API_KEY or anthropic.api_key)'}")
     print(f"    model: {cfg.model}")
 
     outs = cfg.enabled_outputs()
