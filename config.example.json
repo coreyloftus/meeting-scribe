@@ -1,0 +1,39 @@
+{
+  "anthropic": {
+    "api_key": "",
+    "model": "claude-haiku-4-5-20251001",
+    "max_tokens": 4096
+  },
+  "recording": {
+    "dir": "~/Recordings/meetings",
+    "capture_system_audio": true,
+    "capture_mic": true,
+    "mic_device": null
+  },
+  "transcription": {
+    "whisper_cli": "whisper-cli",
+    "whisper_model": "~/.local/share/whisper-cpp/models/ggml-base.en.bin",
+    "language": "auto",
+    "threads": 8,
+    "speaker_labels": true,
+    "me_label": "Me",
+    "them_label": "Them"
+  },
+  "prompts": {
+    "slug": "Given this meeting transcript, generate a short 2-4 word slug (lowercase, hyphen-separated) describing the topic or who was in the meeting. Output ONLY the slug. Examples: budget-review, joe-sprint-planning, client-onboarding.",
+    "summary": "You are reviewing a meeting transcript where speakers are labelled. Produce markdown with these sections:\n\n## Action Items\nSpecific tasks, who they are assigned to (if mentioned), and deadlines. Use a checklist (- [ ]).\n\n## Key Decisions\nDecisions made during the meeting.\n\n## Key Takeaways\nA brief summary of the main discussion points."
+  },
+  "outputs": {
+    "markdown": {
+      "enabled": true,
+      "dir": "~/Documents/meeting-transcripts"
+    },
+    "notion": {
+      "enabled": false,
+      "token": "",
+      "database_id": "",
+      "title_property": "Name",
+      "date_property": "Date"
+    }
+  }
+}

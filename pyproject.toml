@@ -1,0 +1,20 @@
+[project]
+name = "meeting-scribe"
+version = "0.1.0"
+description = "Record a meeting's system audio + mic, transcribe locally with whisper, and turn it into labelled notes + action items in Notion / markdown."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40",
+    "requests>=2.31",
+]
+
+[project.scripts]
+scribe = "meeting_scribe.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["meeting_scribe", "meeting_scribe.outputs"]

@@ -1,0 +1,23 @@
+# Compiled Swift helper (built locally via scripts/build_helper.sh)
+/bin/syscap
+/bin/*.dSYM/
+
+# Real config with secrets — never commit. Ship config.example.json instead.
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Recordings, transcripts, runtime state
+/recordings/
+*.wav
+*.ffmpeg.log
+
+# macOS
+.DS_Store
