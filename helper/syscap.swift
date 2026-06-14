@@ -128,20 +128,35 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
 }
 
 extension CMSampleBuffer {
+    /// Convert a ScreenCaptureKit audio sample buffer into an owned PCM buffer.
+    ///
+    /// We build a *standard* float32 format via `standardFormatWithSampleRate`
+    /// (guaranteed `isPCMFormat == true`) rather than from the raw stream
+    /// description — the latter isn't recognised as PCM and crashes
+    /// `AVAudioPCMBuffer(pcmFormat:)`. The no-copy buffer is only valid inside
+    /// `withAudioBufferList`, so we copy the samples into an owned buffer.
     func toPCMBuffer() -> AVAudioPCMBuffer? {
         guard let fmtDesc = CMSampleBufferGetFormatDescription(self),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fmtDesc)?.pointee,
-              let format = AVAudioFormat(streamDescription: withUnsafePointer(to: asbd) { $0 }) else {
+              let format = AVAudioFormat(standardFormatWithSampleRate: asbd.mSampleRate,
+                                         channels: asbd.mChannelsPerFrame) else {
             return nil
         }
-        let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(self))
-        guard frames > 0,
-              let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return nil }
-        pcm.frameLength = frames
-        CMSampleBufferCopyPCMDataIntoAudioBufferList(self, at: 0,
-                                                     frameCount: Int32(frames),
-                                                     into: pcm.mutableAudioBufferList)
-        return pcm
+        let result = try? withAudioBufferList { abl, _ -> AVAudioPCMBuffer? in
+            guard let noCopy = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: abl.unsafePointer),
+                  noCopy.frameLength > 0,
+                  let owned = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: noCopy.frameLength),
+                  let src = noCopy.floatChannelData, let dst = owned.floatChannelData else {
+                return nil
+            }
+            owned.frameLength = noCopy.frameLength
+            let bytes = Int(noCopy.frameLength) * MemoryLayout<Float>.size
+            for ch in 0..<Int(format.channelCount) {
+                memcpy(dst[ch], src[ch], bytes)
+            }
+            return owned
+        }
+        return result ?? nil
     }
 }
 
