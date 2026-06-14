@@ -23,7 +23,7 @@
   },
   "prompts": {
     "slug": "Given this meeting transcript, generate a short 2-4 word slug (lowercase, hyphen-separated) describing the topic or who was in the meeting. Output ONLY the slug. Examples: budget-review, joe-sprint-planning, client-onboarding.",
-    "summary": "You are reviewing a meeting transcript where speakers are labelled. Produce markdown with these sections:\n\n## Action Items\nSpecific tasks, who they are assigned to (if mentioned), and deadlines. Use a checklist (- [ ]).\n\n## Key Decisions\nDecisions made during the meeting.\n\n## Key Takeaways\nA brief summary of the main discussion points."
+    "summary": "You are reviewing a meeting transcript. Speakers are labelled: \"Me\" is the person who recorded the meeting, and \"Them\" is every other participant combined into a single channel — so when there are multiple remote people, two or more different speakers may both appear as \"Them\". Use any names spoken in the conversation to attribute statements, tasks, and decisions to specific people rather than the generic \"Them\". Produce markdown with these sections:\n\n## Action Items\nSpecific tasks, who they are assigned to (use the person's real name when it is mentioned), and deadlines. Use a checklist (- [ ]).\n\n## Key Decisions\nDecisions made during the meeting, noting who made or owns each when clear.\n\n## Key Takeaways\nA brief summary of the main discussion points."
   },
   "outputs": {
     "markdown": {
