@@ -119,6 +119,12 @@ class Config:
         return expand(self.get("transcription", "whisper_model", default=None))
 
     @property
+    def vad_model(self) -> Path | None:
+        """Silero VAD model for whisper.cpp (--vad). Optional; skipped if the
+        file doesn't exist."""
+        return expand(self.get("transcription", "vad_model", default=None))
+
+    @property
     def whisper_threads(self) -> int:
         return int(self.get("transcription", "threads", default=8))
 

@@ -7,6 +7,7 @@ them back together in time order into a "Me: … / Them: …" dialogue.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -39,7 +40,18 @@ def _run_whisper(cfg: Config, wav: Path, out_base: Path) -> None:
         "--output-json",
         "--output-file", str(out_base),
         "--threads", str(cfg.whisper_threads),
+        # Never condition a 30s window on the previous window's text. With
+        # context carry-over, one bad window (usually a long silence) poisons
+        # every window after it: the decoder locks into repeating a phrase or
+        # emitting [BLANK_AUDIO] for the rest of the file, even over clear
+        # speech. Costs a little cross-sentence continuity; worth it.
+        "--max-context", "0",
     ]
+    vad = cfg.vad_model
+    if vad and Path(vad).is_file():
+        # Skip non-speech before decoding. A meeting channel is often >50%
+        # silence, and decoding silence is where hallucinations start.
+        cmd += ["--vad", "--vad-model", str(vad)]
     if cfg.language and cfg.language != "auto":
         cmd += ["--language", cfg.language]
     cmd.append(str(wav))
@@ -51,13 +63,19 @@ def _run_whisper(cfg: Config, wav: Path, out_base: Path) -> None:
         raise TranscribeError(f"whisper failed: {e.stderr or e.stdout}") from e
 
 
+# Whisper annotates non-speech as bracketed/parenthesized markers —
+# [BLANK_AUDIO], [ Silence ], (mouse clicks), ♪ — not words anyone said.
+_NON_SPEECH = re.compile(r"[\[(][^\])]*[\])]|♪")
+
+
 def _parse_segments(json_path: Path, speaker: str) -> list[Segment]:
     if not json_path.is_file():
         return []
     data = json.loads(json_path.read_text())
     segs = []
     for item in data.get("transcription", []):
-        text = (item.get("text") or "").strip()
+        text = _NON_SPEECH.sub("", item.get("text") or "")
+        text = re.sub(r"\s{2,}", " ", text).strip()
         if not text:
             continue
         start = int(item.get("offsets", {}).get("from", 0))

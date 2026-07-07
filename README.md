@@ -48,6 +48,11 @@ xcode-select --install   # provides swiftc to build the helper
 mkdir -p ~/.local/share/whisper-cpp/models
 curl -L -o ~/.local/share/whisper-cpp/models/ggml-base.en.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+
+# The silero VAD model — skips silence before decoding, which prevents
+# whisper hallucinating text (or [BLANK_AUDIO] loops) during quiet stretches
+curl -L -o ~/.local/share/whisper-cpp/models/ggml-silero-v5.1.2.bin \
+  https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
 ```
 
 You'll also need an **Anthropic API key** (<https://console.anthropic.com>), and —
