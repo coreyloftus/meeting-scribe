@@ -102,6 +102,25 @@ scribe process ~/Downloads/some-call.m4a
 processing fails for any reason, your raw audio is kept — just rerun
 `scribe process <base-path>`.
 
+### Using AirPods (or any Bluetooth headset)
+
+When macOS uses a Bluetooth headset's *microphone*, the link drops into
+hands-free (HFP) mode and the mic is captured at telephone quality (≤24 kHz).
+If `recording.mic_device` is `null`, scribe follows the system default input —
+so the moment your AirPods connect, your side of the transcript degrades.
+
+The fix costs nothing: what the *call* uses and what *scribe records* are
+independent. Pin scribe to the built-in mic and keep wearing the AirPods:
+
+```jsonc
+"recording": { "mic_device": "MacBook Pro Microphone" }
+```
+
+Your meeting app keeps using the AirPods both ways; scribe records your voice
+acoustically at 48 kHz from the built-in mic. There's no crosstalk — the other
+side plays into your headphones, so the room mic only hears you. The one
+trade-off: if you walk out of the room, your side goes quiet in the recording.
+
 ---
 
 ## Desktop app & daemon (Granola-style)
