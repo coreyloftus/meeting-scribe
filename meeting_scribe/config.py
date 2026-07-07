@@ -152,13 +152,25 @@ class Config:
     def notion_token(self) -> str:
         return os.environ.get("NOTION_TOKEN") or self.get("outputs", "notion", "token", default="") or ""
 
+    OUTPUT_KEYS = ("markdown", "notion", "gdocs", "gdrive")
+
     def enabled_outputs(self) -> list[str]:
-        out = []
-        if self.get("outputs", "markdown", "enabled", default=True):
-            out.append("markdown")
-        if self.get("outputs", "notion", "enabled", default=False):
-            out.append("notion")
-        return out
+        return [k for k in self.OUTPUT_KEYS
+                if self.get("outputs", k, "enabled", default=(k == "markdown"))]
+
+    # --- google -------------------------------------------------------------
+    @property
+    def google_client_id(self) -> str:
+        return os.environ.get("GOOGLE_CLIENT_ID") or self.get("google", "client_id", default="") or ""
+
+    @property
+    def google_client_secret(self) -> str:
+        return os.environ.get("GOOGLE_CLIENT_SECRET") or self.get("google", "client_secret", default="") or ""
+
+    @property
+    def google_token_path(self) -> Path:
+        return expand(self.get("google", "token_path",
+                               default="~/.config/meeting-scribe/google_token.json"))
 
 
 def load(path: str | Path | None = None) -> Config:

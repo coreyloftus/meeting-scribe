@@ -11,7 +11,10 @@ import re
 import requests
 
 from ..config import Config
-from . import Note
+from .base import OutputResult
+
+KEY = "notion"
+LABEL = "Notion"
 
 NOTION_API = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
@@ -69,7 +72,11 @@ def markdown_to_blocks(md: str) -> list[dict]:
     return blocks
 
 
-def write(cfg: Config, note: Note) -> str:
+def is_configured(cfg: Config) -> bool:
+    return bool(cfg.notion_token) and bool(cfg.get("outputs", "notion", "database_id", default=""))
+
+
+def write(cfg: Config, note, options: dict | None = None) -> OutputResult:
     token = cfg.notion_token
     database_id = cfg.get("outputs", "notion", "database_id", default="")
     if not token:
@@ -81,6 +88,10 @@ def write(cfg: Config, note: Note) -> str:
     date_prop = cfg.get("outputs", "notion", "date_property", default="Date")
 
     blocks = markdown_to_blocks(note.summary_md)
+    if note.user_notes and note.user_notes.strip():
+        blocks.append({"object": "block", "type": "divider", "divider": {}})
+        blocks.append(_block("heading_2", "My Notes"))
+        blocks += markdown_to_blocks(note.user_notes)
     blocks.append({"object": "block", "type": "divider", "divider": {}})
     blocks.append(_block("heading_2", "Full Transcript"))
     blocks += markdown_to_blocks(note.transcript)
@@ -110,4 +121,4 @@ def write(cfg: Config, note: Note) -> str:
             raise NotionError(f"append blocks failed ({r.status_code}): {r.text[:200]}")
 
     url = page.get("url", page_id)
-    return f"notion: {url}"
+    return OutputResult(target=KEY, ok=True, url=url)

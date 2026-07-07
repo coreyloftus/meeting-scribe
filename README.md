@@ -104,6 +104,58 @@ processing fails for any reason, your raw audio is kept — just rerun
 
 ---
 
+## Desktop app & daemon (Granola-style)
+
+The menu-bar app and the `scribed` daemon add live status, background
+processing, a meetings browser, live in-meeting notes, and one-click pushes.
+See `docs/desktop-app-spec.md` for the full design.
+
+```bash
+# install python deps for the daemon (+ Google outputs)
+.venv/bin/pip install -e ".[daemon,google]"
+
+# build & run the menu-bar app (starts the daemon itself if needed)
+bash scripts/build_app.sh --install
+open /Applications/MeetingScribe.app
+
+# or drive everything from the CLI — it talks to the daemon when it's running
+scribe daemon serve            # foreground daemon (dev)
+scribe daemon install          # launchd LaunchAgent (see note below)
+scribe daemon status
+scribe list                    # meetings index, statuses, output links
+scribe process <meeting-id>    # reprocess via the daemon (background job)
+scribe start --local           # bypass the daemon entirely (original behavior)
+```
+
+- **Live notes:** while recording, type rough bullets in the app's notes pane —
+  they're saved next to the audio (`<base>.notes.md`) and woven into the Claude
+  summary as high-signal anchors. Edit notes later + **Reprocess** to re-summarize.
+- **Everything is rebuildable:** the SQLite index at
+  `~/.local/state/meeting-scribe/meetings.db` is a cache over the recordings
+  dir + markdown notes; delete it and the daemon re-scans on next start.
+- **API:** `http://127.0.0.1:48237/v1/…` with `Authorization: Bearer
+  $(cat ~/.local/state/meeting-scribe/daemon.token)`; SSE stream on `/v1/events`.
+- **launchd caveat:** under `scribe daemon install`, macOS folder-privacy
+  prompts can't appear (the daemon may not be able to read your recordings
+  folder). Prefer letting the app start the daemon, or grant Python
+  Full Disk Access if you want the LaunchAgent.
+
+### Google Docs & Drive outputs
+
+One-time setup: create a GCP project, enable the **Drive API**, create an
+OAuth client of type **Desktop app**, then:
+
+```bash
+scribe config             # put client_id/client_secret under "google" in config.json
+scribe google connect     # browser consent; token cached at ~/.config/meeting-scribe/google_token.json
+```
+
+Enable `outputs.gdrive` (md/txt file upload) and/or `outputs.gdocs` (native
+Google Doc via Drive's markdown import) in config or the app's Settings —
+they then run on every `stop` and appear as push buttons per meeting.
+
+---
+
 ## Configuration
 
 `config.json` is discovered in this order: `$MEETING_SCRIBE_CONFIG`, then
@@ -207,14 +259,19 @@ high-quality A2DP mode and the mic stays at full quality.
 ```
 helper/syscap.swift        ScreenCaptureKit system-audio capture (compiles to bin/syscap)
 scripts/build_helper.sh    Builds the helper
+scripts/build_app.sh       Builds MeetingScribe.app (menu-bar SwiftUI app)
+app/                       SwiftUI app: menu-bar badge, meetings window, live notes
 meeting_scribe/
-  cli.py                   `scribe` entry point (start/stop/process/doctor/config)
+  cli.py                   `scribe` entry point (daemon-aware; --local fallback)
+  client.py                HTTP client for the daemon (used by the CLI)
   recorder.py              Starts/stops the two capture processes; session state
   audio.py                 ffmpeg resample + level/quality checks (the bug fix lives here)
   transcribe.py            whisper.cpp per-channel + Me/Them speaker labelling
-  llm.py                   Anthropic API: slug + summary
-  process.py               Pipeline: transcribe → summarise → write outputs
-  outputs/                 Pluggable destinations (markdown, notion)
+  llm.py                   Anthropic API: slug + summary (+ user-notes weaving)
+  process.py               Pipeline stages: transcribe → summarise → write outputs
+  outputs/                 Plugin registry: markdown, notion, gdrive, gdocs
+  integrations/            google_auth.py — desktop OAuth + Drive upload helper
+  daemon/                  scribed: FastAPI server, SQLite index, job queue, SSE, launchd
 config.example.json        Template config
 ```
 

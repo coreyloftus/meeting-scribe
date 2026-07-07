@@ -36,6 +36,24 @@
       "database_id": "",
       "title_property": "Name",
       "date_property": "Date"
+    },
+    "gdocs": {
+      "enabled": false,
+      "folder_id": ""
+    },
+    "gdrive": {
+      "enabled": false,
+      "folder_id": "",
+      "format": "md"
     }
+  },
+  "google": {
+    "client_id": "",
+    "client_secret": "",
+    "token_path": "~/.config/meeting-scribe/google_token.json"
+  },
+  "daemon": {
+    "host": "127.0.0.1",
+    "port": 48237
   }
 }

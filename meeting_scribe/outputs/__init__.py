@@ -1,14 +1,15 @@
 """Pluggable output destinations.
 
-Each writer takes the same `Note` and sends it somewhere. Which writers run is
-controlled entirely by config (`outputs.markdown.enabled`, `outputs.notion.enabled`),
-so a user who doesn't use Notion just leaves it disabled.
+Each writer takes the same `Note` and sends it somewhere. Which writers run
+automatically is controlled by config (`outputs.<key>.enabled`); any registered
+writer can also be targeted individually via `write_one` (the daemon's "push"
+action). See base.py for the registry contract.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..config import Config
+from .base import OutputResult, REGISTRY, write_all, write_one  # noqa: F401
 
 
 @dataclass
@@ -19,6 +20,7 @@ class Note:
     summary_md: str
     transcript: str
     audio_path: str | None = None
+    user_notes: str | None = None   # notes typed by the user during the meeting
 
     def full_markdown(self) -> str:
         parts = [
@@ -28,25 +30,8 @@ class Note:
         ]
         if self.audio_path:
             parts.append(f"_Audio: {self.audio_path}_")
-        parts += ["", self.summary_md, "", "---", "", "## Full Transcript", "", self.transcript]
+        parts += ["", self.summary_md]
+        if self.user_notes and self.user_notes.strip():
+            parts += ["", "---", "", "## My Notes", "", self.user_notes.strip()]
+        parts += ["", "---", "", "## Full Transcript", "", self.transcript]
         return "\n".join(parts)
-
-
-def write_all(cfg: Config, note: Note) -> list[str]:
-    """Run every enabled output. Returns human-readable result lines.
-
-    Each writer is imported only when its output is enabled, so e.g. the Notion
-    writer's `requests` dependency isn't required for a markdown-only setup.
-    """
-    results: list[str] = []
-    for name in cfg.enabled_outputs():
-        try:
-            if name == "markdown":
-                from . import markdown as markdown_out
-                results.append(markdown_out.write(cfg, note))
-            elif name == "notion":
-                from . import notion as notion_out
-                results.append(notion_out.write(cfg, note))
-        except Exception as e:  # one output failing shouldn't lose the others
-            results.append(f"{name}: FAILED — {e}")
-    return results

@@ -49,6 +49,16 @@ class Session:
 def _alive(pid: int | None) -> bool:
     if not pid:
         return False
+    # When the caller is the process's parent (the daemon spawns the captures
+    # and stays alive), an exited child lingers as a zombie that still answers
+    # kill(pid, 0) — reap it first or stop() waits its full timeout on a corpse.
+    # In the CLI case the captures aren't our children and waitpid raises.
+    try:
+        reaped, _ = os.waitpid(pid, os.WNOHANG)
+        if reaped == pid:
+            return False
+    except (ChildProcessError, OSError):
+        pass
     try:
         os.kill(pid, 0)
         return True
@@ -126,9 +136,12 @@ def start(cfg: Config) -> Session:
         mic_wav = str(base) + ".mic.wav"
         log = open(str(base) + ".ffmpeg.log", "wb")
         # No -ar here: capture at the device's native rate, resample later.
+        # -flush_packets 1: write every packet straight to disk — ffmpeg 8's
+        # stop path only flushes whole buffered chunks, which otherwise drops
+        # the last few seconds of the meeting.
         p = subprocess.Popen(
             ["ffmpeg", "-nostdin", "-f", "avfoundation", "-i", f":{mic}",
-             "-ac", "1", "-y", mic_wav],
+             "-ac", "1", "-flush_packets", "1", "-y", mic_wav],
             stdout=log, stderr=log, stdin=subprocess.DEVNULL)
         mic_pid = p.pid
 
@@ -160,20 +173,25 @@ def start(cfg: Config) -> Session:
 
 
 def _stop_pid(pid: int | None, timeout: float = 10.0) -> None:
+    """TERM, TERM again, then KILL. The double TERM is deliberate: Homebrew
+    ffmpeg 8 never acts on its first signal while capturing from avfoundation
+    (the graceful-stop flag isn't polled), but the second signal takes its
+    force-exit path, which still writes the WAV trailer ("Exiting normally,
+    received signal 15"). syscap exits cleanly on the first TERM."""
     if not _alive(pid):
         return
-    try:
-        os.kill(pid, signal.SIGINT)  # lets ffmpeg/syscap finalize the WAV
-    except OSError:
-        return
-    deadline = time.time() + timeout
-    while time.time() < deadline and _alive(pid):
-        time.sleep(0.25)
-    if _alive(pid):
+    for sig, wait in ((signal.SIGTERM, 0.6),
+                      (signal.SIGTERM, max(timeout - 2.6, 2.0)),
+                      (signal.SIGKILL, 2.0)):
         try:
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, sig)
         except OSError:
-            pass
+            return
+        deadline = time.time() + wait
+        while time.time() < deadline:
+            if not _alive(pid):
+                return
+            time.sleep(0.1)
 
 
 def stop(cfg: Config) -> Session:
