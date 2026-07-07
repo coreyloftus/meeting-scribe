@@ -15,6 +15,7 @@
   "transcription": {
     "whisper_cli": "whisper-cli",
     "whisper_model": "~/.local/share/whisper-cpp/models/ggml-base.en.bin",
+    "vad_model": "~/.local/share/whisper-cpp/models/ggml-silero-v5.1.2.bin",
     "language": "auto",
     "threads": 8,
     "speaker_labels": true,
