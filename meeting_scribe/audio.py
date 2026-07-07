@@ -26,6 +26,18 @@ def probe_sample_rate(path: Path) -> int | None:
         return None
 
 
+def probe_duration_sec(path: Path) -> int | None:
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=15)
+        data = json.loads(out.stdout or "{}")
+        return int(float(data["format"]["duration"]))
+    except Exception:
+        return None
+
+
 def to_whisper_wav(src: Path, dst: Path) -> Path:
     """Resample any input to 16 kHz mono PCM — the format whisper.cpp wants."""
     subprocess.run(

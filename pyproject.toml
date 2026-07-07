@@ -9,12 +9,17 @@ dependencies = [
     "requests>=2.31",
 ]
 
+[project.optional-dependencies]
+daemon = ["fastapi>=0.110", "uvicorn>=0.29"]
+google = ["google-auth>=2.29", "google-auth-oauthlib>=1.2"]
+
 [project.scripts]
 scribe = "meeting_scribe.cli:main"
+scribed = "meeting_scribe.daemon.server:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["meeting_scribe", "meeting_scribe.outputs"]
+packages = ["meeting_scribe", "meeting_scribe.outputs", "meeting_scribe.daemon", "meeting_scribe.integrations"]

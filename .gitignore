@@ -21,3 +21,7 @@ dist/
 
 # macOS
 .DS_Store
+
+# Swift app build artifacts (scripts/build_app.sh outputs)
+app/.build/
+app/dist/

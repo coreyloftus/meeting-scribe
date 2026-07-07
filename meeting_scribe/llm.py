@@ -80,8 +80,20 @@ def make_slug(cfg: Config, transcript: str) -> str:
     return slugify(out)
 
 
-def summarize(cfg: Config, transcript: str) -> str:
-    """Markdown summary with action items, decisions, and takeaways."""
+def summarize(cfg: Config, transcript: str, user_notes: str | None = None) -> str:
+    """Markdown summary with action items, decisions, and takeaways.
+
+    `user_notes` are bullets the user typed during the meeting; they get woven
+    into the prompt as high-signal anchors for what mattered.
+    """
     prompt = cfg.summary_prompt or (
         "Summarize this meeting transcript into Action Items, Key Decisions, and Key Takeaways in markdown.")
-    return _generate(cfg, f"{prompt}\n\nTranscript:\n\n{transcript}", max_tokens=cfg.max_tokens)
+    parts = [prompt]
+    if user_notes and user_notes.strip():
+        parts.append(
+            "The user took these notes during the meeting. Treat them as "
+            "high-signal pointers to what mattered — expand on them using the "
+            "transcript, and make sure every point they wrote down is covered:\n\n"
+            f"{user_notes.strip()}")
+    parts.append(f"Transcript:\n\n{transcript}")
+    return _generate(cfg, "\n\n".join(parts), max_tokens=cfg.max_tokens)
