@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import socket
 import time
@@ -565,6 +566,13 @@ def serve(host: str = state.DEFAULT_HOST, port: int | None = None) -> None:
         if _signal.getsignal(_sig) == _signal.SIG_IGN:
             _signal.signal(_sig, _signal.SIG_DFL)
             print(f"[scribed] reset inherited SIG_IGN for {_sig.name}", flush=True)
+    # A daemon spawned outside a login shell (app fallback, launchd) may get a
+    # bare PATH without Homebrew, where ffmpeg/ffprobe/whisper-cli live.
+    _path = os.environ.get("PATH", "")
+    for _dir in ("/usr/local/bin", "/opt/homebrew/bin"):
+        if os.path.isdir(_dir) and _dir not in _path.split(os.pathsep):
+            _path = _dir + os.pathsep + _path
+    os.environ["PATH"] = _path
     TOKEN = state.ensure_token()
     DB = Database(state.DB_FILE)
     actual_port = _pick_port(host, port or state.DEFAULT_PORT)

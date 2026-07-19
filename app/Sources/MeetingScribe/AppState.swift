@@ -81,6 +81,7 @@ final class AppState: ObservableObject {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let script = """
         launchctl kickstart -k gui/$(id -u)/com.meetingscribe.scribed 2>/dev/null || \
+        PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" \
         nohup "\(home)/.local/bin/scribed" serve >> "\(home)/.local/state/meeting-scribe/scribed.log" 2>&1 &
         """
         let p = Process()

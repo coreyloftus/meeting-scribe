@@ -135,8 +135,19 @@ def process(cfg: Config, system_wav: str | None, mic_wav: str | None,
 
     warnings = check_audio(system_wav, mic_wav)
 
-    on_phase("transcribing", None)
-    transcript, transcript_path = make_transcript(cfg, system_wav, mic_wav)
+    # Reuse a transcript newer than its audio (a retry after a failed
+    # summarize step) rather than re-running whisper on the whole meeting.
+    transcript, transcript_path = "", None
+    if base is not None:
+        tp = transcript_path_for(base)
+        if tp.is_file():
+            wav_mtimes = [Path(w).stat().st_mtime for w in (system_wav, mic_wav)
+                          if w and Path(w).is_file()]
+            if wav_mtimes and tp.stat().st_mtime >= max(wav_mtimes):
+                transcript, transcript_path = tp.read_text(), tp
+    if not transcript.strip():
+        on_phase("transcribing", None)
+        transcript, transcript_path = make_transcript(cfg, system_wav, mic_wav)
 
     on_phase("summarizing", None)
     note = build_note(cfg, transcript, audio_label=audio_label,
