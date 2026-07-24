@@ -58,15 +58,15 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
             fail("no display available to attach the audio capture to")
         }
 
-        // We must attach to a display to capture audio, but we don't care about
-        // the video. Exclude our own process so we never record ourselves.
+        // Attach to a display to capture its audio; the video path is ignored.
         let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
 
         let config = SCStreamConfiguration()
         config.capturesAudio = true
         config.sampleRate = sampleRate
         config.channelCount = channels
-        config.excludesCurrentProcessAudio = true
+        // excludesCurrentProcessAudio=true yields pure silence (or drops the stream) on macOS 15+/26 via a broken per-process tap; this helper emits no audio to exclude anyway.
+        config.excludesCurrentProcessAudio = false
         // Keep the (ignored) video path as cheap as possible.
         config.width = 2
         config.height = 2
