@@ -44,6 +44,7 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private let sampleRate: Int
     private let channels: Int
     private var wroteAnything = false
+    private var streamError: Error?
 
     init(outputURL: URL, sampleRate: Int, channels: Int) {
         self.outputURL = outputURL
@@ -115,14 +116,19 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        streamError = error
         FileHandle.standardError.write("syscap: stream stopped: \(error.localizedDescription)\n".data(using: .utf8)!)
     }
 
     func stop() async {
         try? await stream?.stopCapture()
         audioFile = nil // flush + finalize the WAV header
-        if !wroteAnything {
-            FileHandle.standardError.write("syscap: warning — no audio was captured (was anything playing?)\n".data(using: .utf8)!)
+        guard !wroteAnything else { return }
+        if let err = streamError {
+            // Stream failed rather than staying silent: almost always a missing/stale Screen Recording grant (rebuilding the ad-hoc-signed binary invalidates it).
+            FileHandle.standardError.write("syscap: error — capture failed, no audio written. The ScreenCaptureKit stream stopped early (\(err.localizedDescription)). This is almost always a missing or invalidated Screen Recording permission — grant it under System Settings > Privacy & Security > Screen Recording and retry.\n".data(using: .utf8)!)
+        } else {
+            FileHandle.standardError.write("syscap: warning — stream ran but no audio arrived (was anything actually playing through the selected output?).\n".data(using: .utf8)!)
         }
     }
 }
