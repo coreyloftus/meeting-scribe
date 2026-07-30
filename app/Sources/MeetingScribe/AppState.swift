@@ -1,5 +1,6 @@
 // Central observable state: daemon connection, live status, meetings list.
 // Subscribes to /v1/events (SSE) and falls back to 2s polling if the stream drops.
+import CoreGraphics
 import Foundation
 import SwiftUI
 
@@ -188,7 +189,26 @@ final class AppState: ObservableObject {
         }
     }
 
-    func startRecording() { run("start") { [self] in try await client?.start() } }
+    /// Screen Recording is granted to *this app*, never to `syscap`: the helper
+    /// runs under scribed, which the app spawns, so TCC resolves the whole chain
+    /// back to MeetingScribe.app as the responsible process. Ask here so the
+    /// grant is anchored deliberately, instead of the user meeting a bare system
+    /// prompt mid-record and /v1/start returning a 500.
+    private func ensureScreenRecordingAccess() -> Bool {
+        if CGPreflightScreenCaptureAccess() { return true }
+        // Shows the system prompt. The answer only takes effect for processes
+        // launched afterwards, so the daemon (and this app) need a restart.
+        _ = CGRequestScreenCaptureAccess()
+        lastError = "start: Screen Recording permission is missing. Approve the "
+            + "system prompt (or System Settings > Privacy & Security > Screen "
+            + "Recording), then quit and relaunch Meeting Scribe."
+        return false
+    }
+
+    func startRecording() {
+        guard ensureScreenRecordingAccess() else { return }
+        run("start") { [self] in try await client?.start() }
+    }
 
     func stopRecording() {
         stopping = true
