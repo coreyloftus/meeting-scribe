@@ -7,13 +7,14 @@ them back together in time order into a "Me: … / Them: …" dialogue.
 from __future__ import annotations
 
 import array
+import bisect
 import json
 import math
 import re
 import subprocess
 import tempfile
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .config import Config
@@ -33,11 +34,22 @@ GAP_BREAK_MS = 2000
 MAX_LINE_MS = 30_000
 
 # Echo dedup: two segments on opposite channels are the same utterance when
-# their time ranges overlap (with slack for whisper timestamp drift between
-# channels) and their word containment clears the similarity bar.
-ECHO_SLACK_MS = 2000
+# their time ranges overlap (after alignment, with slack for whisper segment
+# boundaries landing differently per channel) and their word containment
+# clears the similarity bar.
+ECHO_SLACK_MS = 5000
 ECHO_MIN_WORDS = 3
 ECHO_SIMILARITY = 0.6
+
+# The two channels' clocks cannot be trusted against each other: a capture
+# rate bug can stretch one timeline by minutes over a long meeting (observed:
+# a system.wav 304s longer than the mic.wav of the same call). When echo is
+# pervasive, confident text matches ("anchors") reveal the true local offset
+# between the timelines; segments are realigned from those before gating.
+ANCHOR_SIMILARITY = 0.75
+ANCHOR_MIN_WORDS = 5
+ANCHOR_WINDOW = 4          # anchors on each side of a point -> local median
+ANCHOR_COVERAGE = 0.25     # fraction of segments anchored before realigning
 
 
 @dataclass
@@ -137,7 +149,7 @@ def transcribe(cfg: Config, system_wav: Path | None, mic_wav: Path | None) -> tu
             sys_segs = transcribe_channel(cfg, Path(system_wav), cfg.them_label, workdir)
 
             if mic_segs and sys_segs:
-                mic_segs, sys_segs, dropped = _dedupe_echoes(
+                mic_segs, sys_segs, dropped, realign_ms = _dedupe_echoes(
                     mic_segs, sys_segs,
                     _whisper_wav_path(workdir, cfg.me_label),
                     _whisper_wav_path(workdir, cfg.them_label))
@@ -146,6 +158,11 @@ def transcribe(cfg: Config, system_wav: Path | None, mic_wav: Path | None) -> tu
                         f"Cross-channel echo detected — {dropped} duplicated segments "
                         f"removed (each utterance kept on the channel where it was loudest). "
                         f"Speaker labels may be imperfect where the echo was strong.")
+                if realign_ms > 10_000:
+                    warnings.append(
+                        f"The system channel's timeline was out of step with the mic "
+                        f"by up to {realign_ms // 1000}s (capture clock bug); segments "
+                        f"were realigned using matching text.")
             else:
                 for empty_label, segs, full_label in (
                         (cfg.them_label, sys_segs, cfg.me_label),
@@ -175,18 +192,24 @@ def transcribe(cfg: Config, system_wav: Path | None, mic_wav: Path | None) -> tu
 _WORD = re.compile(r"[a-z0-9']+")
 
 
-def _echo_similarity(a: str, b: str) -> float:
-    """Word containment: how much of the shorter segment appears in the other.
+def _word_set(text: str) -> frozenset[str]:
+    return frozenset(_WORD.findall(text.lower()))
+
+
+def _containment(wa: frozenset[str], wb: frozenset[str]) -> float:
+    """How much of the shorter segment's words appear in the other.
 
     Containment (not symmetric similarity) because whisper splits the two
     channels at different points — one channel's segment often covers half of
     two segments on the other channel.
     """
-    wa = set(_WORD.findall(a.lower()))
-    wb = set(_WORD.findall(b.lower()))
     if min(len(wa), len(wb)) < ECHO_MIN_WORDS:
         return 0.0
     return len(wa & wb) / min(len(wa), len(wb))
+
+
+def _echo_similarity(a: str, b: str) -> float:
+    return _containment(_word_set(a), _word_set(b))
 
 
 def _segment_energies(wav_path: Path, segs: list[Segment]) -> list[float]:
@@ -219,24 +242,78 @@ def _segment_energies(wav_path: Path, segs: list[Segment]) -> list[float]:
     return [e / med for e in rms]
 
 
+def _anchor_offsets(mic_segs: list[Segment], sys_segs: list[Segment],
+                    mic_words: list[frozenset[str]],
+                    sys_words: list[frozenset[str]]) -> list[tuple[int, int]]:
+    """Confident cross-channel text matches as (sys_start_ms, offset_ms),
+    time-ordered. offset = sys_start - mic_start for the same utterance."""
+    anchors: list[tuple[int, int]] = []
+    for j, b in enumerate(sys_segs):
+        if len(sys_words[j]) < ANCHOR_MIN_WORDS:
+            continue
+        best_i, best = -1, 0.0
+        for i in range(len(mic_segs)):
+            sim = _containment(mic_words[i], sys_words[j])
+            if sim > best:
+                best_i, best = i, sim
+        if best >= ANCHOR_SIMILARITY:
+            anchors.append((b.start_ms, b.start_ms - mic_segs[best_i].start_ms))
+    anchors.sort()
+    return anchors
+
+
 def _dedupe_echoes(mic_segs: list[Segment], sys_segs: list[Segment],
-                   mic_wav: Path, sys_wav: Path) -> tuple[list[Segment], list[Segment], int]:
+                   mic_wav: Path, sys_wav: Path) -> tuple[list[Segment], list[Segment], int, int]:
     """Drop cross-channel echoes: when both channels heard the same utterance
     (mic picking up the speakers, or the meeting app returning your voice),
     keep the copy on the channel where it was relatively loudest — that's the
     channel the utterance actually belongs to.
+
+    When echo is pervasive, the text anchors also re-align the system
+    channel's timeline onto the mic's (see ANCHOR_* above) — both for echo
+    gating and so the merged transcript interleaves in true conversation
+    order. Returns (kept_mic, kept_sys, dropped_count, max_realign_ms);
+    kept_sys carries realigned timestamps.
     """
+    # Energies are sliced from the wavs, so compute them before any realigning.
     mic_rel = _segment_energies(mic_wav, mic_segs)
     sys_rel = _segment_energies(sys_wav, sys_segs)
+
+    mic_words = [_word_set(s.text) for s in mic_segs]
+    sys_words = [_word_set(s.text) for s in sys_segs]
+    anchors = _anchor_offsets(mic_segs, sys_segs, mic_words, sys_words)
+
+    realign = len(anchors) >= ANCHOR_COVERAGE * len(sys_segs)
+
+    def offset_at(sys_start_ms: int) -> int:
+        """Local median of nearby anchor offsets — robust to the occasional
+        false anchor (a phrase genuinely repeated elsewhere in the call)."""
+        if not realign:
+            return 0
+        k = bisect.bisect_left(anchors, (sys_start_ms,))
+        lo = max(0, k - ANCHOR_WINDOW)
+        window = sorted(off for _, off in anchors[lo:k + ANCHOR_WINDOW + 1])
+        return window[len(window) // 2]
+
+    max_realign = 0
+    if realign:
+        aligned_sys = []
+        for s in sys_segs:
+            off = offset_at(s.start_ms)
+            max_realign = max(max_realign, abs(off))
+            aligned_sys.append(replace(s, start_ms=s.start_ms - off,
+                                       end_ms=s.end_ms - off))
+        sys_segs = aligned_sys
+
     drop_mic: set[int] = set()
     drop_sys: set[int] = set()
-    for i, a in enumerate(mic_segs):
-        for j, b in enumerate(sys_segs):
-            if b.start_ms > a.end_ms + ECHO_SLACK_MS:
-                break  # sys_segs is time-ordered; nothing later can overlap
-            if b.end_ms < a.start_ms - ECHO_SLACK_MS:
+    for j, b in enumerate(sys_segs):
+        for i, a in enumerate(mic_segs):
+            if a.start_ms > b.end_ms + ECHO_SLACK_MS:
+                break  # mic_segs is time-ordered; nothing later can overlap
+            if a.end_ms < b.start_ms - ECHO_SLACK_MS:
                 continue
-            if _echo_similarity(a.text, b.text) < ECHO_SIMILARITY:
+            if _containment(mic_words[i], sys_words[j]) < ECHO_SIMILARITY:
                 continue
             if mic_rel[i] >= sys_rel[j]:
                 drop_sys.add(j)
@@ -244,7 +321,7 @@ def _dedupe_echoes(mic_segs: list[Segment], sys_segs: list[Segment],
                 drop_mic.add(i)
     kept_mic = [s for i, s in enumerate(mic_segs) if i not in drop_mic]
     kept_sys = [s for j, s in enumerate(sys_segs) if j not in drop_sys]
-    return kept_mic, kept_sys, len(drop_mic) + len(drop_sys)
+    return kept_mic, kept_sys, len(drop_mic) + len(drop_sys), max_realign
 
 
 def _render_dialogue(segments: list[Segment]) -> str:
