@@ -38,11 +38,19 @@ let channels = intFlag("--channels", 2)
 // ---- Capture engine ---------------------------------------------------------
 
 final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
+    /// Invoked when the stream dies on its own, so the owner can tear the whole
+    /// process down instead of letting a dead stream look like a live recording.
+    var onStreamFailure: (() -> Void)?
+
     private var stream: SCStream?
     private var audioFile: AVAudioFile?
     private let outputURL: URL
     private let sampleRate: Int
     private let channels: Int
+
+    // Written from the SCStream callback queues, read during teardown — guard
+    // both so the report at stop() can't race the delegate.
+    private let stateLock = NSLock()
     private var wroteAnything = false
     private var streamError: Error?
 
@@ -50,6 +58,25 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
         self.outputURL = outputURL
         self.sampleRate = sampleRate
         self.channels = channels
+    }
+
+    // Kept synchronous on purpose: NSLock may not be taken across an await.
+    private func markWrote() {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        wroteAnything = true
+    }
+
+    private func recordFailure(_ error: Error) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        streamError = error
+    }
+
+    private func snapshot() -> (wrote: Bool, error: Error?) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return (wroteAnything, streamError)
     }
 
     func start() async throws {
@@ -66,7 +93,10 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
         config.capturesAudio = true
         config.sampleRate = sampleRate
         config.channelCount = channels
-        // excludesCurrentProcessAudio=true yields pure silence (or drops the stream) on macOS 15+/26 via a broken per-process tap; this helper emits no audio to exclude anyway.
+        // `true` yields pure silence (or drops the stream outright) on macOS 15+/26
+        // via a broken per-process tap. Leaving it off is safe here because nothing
+        // in the capture pipeline plays audio — syscap only writes a file — so
+        // there is no output of our own to feed back into the recording.
         config.excludesCurrentProcessAudio = false
         // Keep the (ignored) video path as cheap as possible.
         config.width = 2
@@ -109,27 +139,48 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
 
         do {
             try audioFile?.write(from: pcm)
-            wroteAnything = true
+            markWrote()
         } catch {
             FileHandle.standardError.write("syscap: write error: \(error)\n".data(using: .utf8)!)
         }
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        streamError = error
+        recordFailure(error)
         FileHandle.standardError.write("syscap: stream stopped: \(error.localizedDescription)\n".data(using: .utf8)!)
+        // Don't linger on a dead stream. The caller only checks that our pid is
+        // alive (recorder.py, one second after start), so staying up would hide
+        // the failure until the meeting ended — with a silent or truncated WAV.
+        onStreamFailure?()
     }
 
-    func stop() async {
+    /// Finalize the WAV and report what actually happened. Returns the process
+    /// exit code: non-zero whenever the stream failed, so the failure surfaces
+    /// through the caller's liveness check instead of only in the log.
+    func stop() async -> Int32 {
         try? await stream?.stopCapture()
         audioFile = nil // flush + finalize the WAV header
-        guard !wroteAnything else { return }
-        if let err = streamError {
-            // Stream failed rather than staying silent: almost always a missing/stale Screen Recording grant (rebuilding the ad-hoc-signed binary invalidates it).
-            FileHandle.standardError.write("syscap: error — capture failed, no audio written. The ScreenCaptureKit stream stopped early (\(err.localizedDescription)). This is almost always a missing or invalidated Screen Recording permission — grant it under System Settings > Privacy & Security > Screen Recording and retry.\n".data(using: .utf8)!)
-        } else {
+
+        let (wrote, err) = snapshot()
+
+        // Report a stream failure even when some audio landed: a truncated
+        // system track silently misaligns against the full-length mic track.
+        if let err {
+            let what = wrote
+                ? "capture ended early — the WAV is truncated and will not line up with the mic track"
+                : "capture failed, no audio written"
+            let msg = "syscap: error — \(what). The ScreenCaptureKit stream stopped early "
+                + "(\(err.localizedDescription)). Most often that means a missing or "
+                + "invalidated Screen Recording permission — grant it under System Settings > "
+                + "Privacy & Security > Screen Recording and retry. It can also mean the "
+                + "captured display was disconnected or slept.\n"
+            FileHandle.standardError.write(msg.data(using: .utf8)!)
+            return 1
+        }
+        if !wrote {
             FileHandle.standardError.write("syscap: warning — stream ran but no audio arrived (was anything actually playing through the selected output?).\n".data(using: .utf8)!)
         }
+        return 0
     }
 }
 
@@ -172,6 +223,11 @@ let recorder = SystemAudioRecorder(outputURL: URL(fileURLWithPath: outputPath),
                                    sampleRate: sampleRate, channels: channels)
 
 let stopSem = DispatchSemaphore(value: 0)
+
+// A stream that dies on its own tears the process down the same way a signal
+// does, so the WAV header is still finalized before we exit non-zero.
+recorder.onStreamFailure = { stopSem.signal() }
+
 var signalSources: [DispatchSourceSignal] = []
 for sig in [SIGINT, SIGTERM] {
     signal(sig, SIG_IGN)
@@ -193,8 +249,7 @@ Task {
 DispatchQueue.global().async {
     stopSem.wait()
     Task {
-        await recorder.stop()
-        exit(0)
+        exit(await recorder.stop())
     }
 }
 
