@@ -120,6 +120,7 @@ def _note_from_meeting(m: dict) -> Note:
         transcript=_read_optional(m.get("transcript_path")) or "",
         audio_path=(m.get("base_path") or None) and m["base_path"] + ".*.wav",
         user_notes=_read_optional(m.get("notes_path")),
+        warnings=[w for w in (m.get("warnings") or "").split("\n") if w],
     )
 
 
@@ -154,6 +155,7 @@ def _handle_process(job: Job) -> None:
     DB.update_meeting(
         job.meeting_id, status="done", error=None,
         title=note.title, slug=note.slug, summary_md=note.summary_md,
+        warnings="\n".join(result.warnings) if result.warnings else None,
         transcript_path=str(result.transcript_path) if result.transcript_path else None)
     for r in result.outputs:
         DB.add_output(job.meeting_id, r.target, r.ok, r.url, r.detail)

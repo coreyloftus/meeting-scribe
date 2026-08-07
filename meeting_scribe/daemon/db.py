@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS meetings (
   transcript_path TEXT,
   notes_path      TEXT,
   summary_md      TEXT,
+  warnings        TEXT,                  -- newline-joined capture warnings
   error           TEXT,
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL
@@ -75,6 +76,12 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_SCHEMA)
+        # CREATE TABLE IF NOT EXISTS never alters an existing table, so columns
+        # added to _SCHEMA after a db was created need an explicit migration.
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(meetings)")}
+        if "warnings" not in cols:
+            self._conn.execute("ALTER TABLE meetings ADD COLUMN warnings TEXT")
+            self._conn.commit()
         self._lock = threading.Lock()
 
     def close(self) -> None:

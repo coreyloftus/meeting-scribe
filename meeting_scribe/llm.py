@@ -80,15 +80,27 @@ def make_slug(cfg: Config, transcript: str) -> str:
     return slugify(out)
 
 
-def summarize(cfg: Config, transcript: str, user_notes: str | None = None) -> str:
+def summarize(cfg: Config, transcript: str, user_notes: str | None = None,
+              warnings: list[str] | None = None) -> str:
     """Markdown summary with action items, decisions, and takeaways.
 
     `user_notes` are bullets the user typed during the meeting; they get woven
-    into the prompt as high-signal anchors for what mattered.
+    into the prompt as high-signal anchors for what mattered. `warnings` are
+    capture-quality caveats (silent channel, echo) that the model must respect
+    when attributing statements to speakers.
     """
     prompt = cfg.summary_prompt or (
         "Summarize this meeting transcript into Action Items, Key Decisions, and Key Takeaways in markdown.")
     parts = [prompt]
+    if warnings:
+        joined = "\n".join(f"- {w}" for w in warnings)
+        parts.append(
+            "Known capture problems with this transcript:\n\n"
+            f"{joined}\n\n"
+            "Where these say speaker attribution is unreliable, do NOT trust the "
+            "Me/Them labels for assigning owners to action items — attribute only "
+            "when the words themselves make the owner clear (e.g. \"I'll take "
+            "that\"), and otherwise mark the owner as uncertain.")
     if user_notes and user_notes.strip():
         parts.append(
             "The user took these notes during the meeting. Treat them as "
