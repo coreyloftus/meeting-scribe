@@ -85,9 +85,11 @@ def check_audio(system_wav: str | None, mic_wav: str | None) -> list[str]:
     return warnings
 
 
-def make_transcript(cfg: Config, system_wav: str | None, mic_wav: str | None) -> tuple[str, Path | None]:
-    """Transcribe and persist the transcript next to the audio. Returns (text, path)."""
-    transcript = transcribe.transcribe(cfg, system_wav, mic_wav)
+def make_transcript(cfg: Config, system_wav: str | None,
+                    mic_wav: str | None) -> tuple[str, Path | None, list[str]]:
+    """Transcribe and persist the transcript next to the audio.
+    Returns (text, path, warnings)."""
+    transcript, warnings = transcribe.transcribe(cfg, system_wav, mic_wav)
     if not transcript.strip():
         raise RuntimeError("Transcript was empty — check the recordings and whisper model.")
     path = None
@@ -98,14 +100,15 @@ def make_transcript(cfg: Config, system_wav: str | None, mic_wav: str | None) ->
             path.write_text(transcript)
         except OSError:
             path = None  # transcript still returned; persistence is best-effort
-    return transcript, path
+    return transcript, path, warnings
 
 
 def build_note(cfg: Config, transcript: str, audio_label: str | None = None,
-               user_notes: str | None = None, meeting_date: str | None = None) -> Note:
+               user_notes: str | None = None, meeting_date: str | None = None,
+               warnings: list[str] | None = None) -> Note:
     """Slug + summary via the LLM, assembled into a Note."""
     slug = llm.make_slug(cfg, transcript)
-    summary = llm.summarize(cfg, transcript, user_notes=user_notes)
+    summary = llm.summarize(cfg, transcript, user_notes=user_notes, warnings=warnings)
     day = meeting_date or _today()
     return Note(
         title=f"{day} {slug.replace('-', ' ')}",
@@ -115,6 +118,7 @@ def build_note(cfg: Config, transcript: str, audio_label: str | None = None,
         transcript=transcript,
         audio_path=audio_label,
         user_notes=user_notes,
+        warnings=list(warnings or []),
     )
 
 
@@ -147,11 +151,13 @@ def process(cfg: Config, system_wav: str | None, mic_wav: str | None,
                 transcript, transcript_path = tp.read_text(), tp
     if not transcript.strip():
         on_phase("transcribing", None)
-        transcript, transcript_path = make_transcript(cfg, system_wav, mic_wav)
+        transcript, transcript_path, tx_warnings = make_transcript(cfg, system_wav, mic_wav)
+        warnings += tx_warnings
 
     on_phase("summarizing", None)
     note = build_note(cfg, transcript, audio_label=audio_label,
-                      user_notes=user_notes, meeting_date=meeting_date)
+                      user_notes=user_notes, meeting_date=meeting_date,
+                      warnings=warnings)
 
     on_phase("writing_outputs", None)
     results = write_all(cfg, note)
