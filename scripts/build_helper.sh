@@ -21,13 +21,10 @@ swiftc -O \
   "$SRC" -o "$OUT"
 
 # Sign with the same stable identity as the app. syscap is the process that
-# actually opens the SCStream, so give it a stable identity too rather than the
-# linker-signed ad-hoc default. See scripts/setup_signing.sh.
-SIGN_ID="Meeting Scribe Local Signing"
-SIGN_KC="$HOME/Library/Keychains/meeting-scribe-signing.keychain-db"
-if [[ -f "$SIGN_KC" ]] && security find-identity "$SIGN_KC" 2>/dev/null | grep -qF "$SIGN_ID"; then
-  security unlock-keychain -p meetingscribe "$SIGN_KC"
-  codesign --force -s "$SIGN_ID" --keychain "$SIGN_KC" "$OUT"
-fi
+# actually opens the SCStream, so it needs the stable designated requirement
+# even more than the app does — the fallback warning is not decorative.
+# shellcheck source=scripts/signing.sh
+source "$HERE/scripts/signing.sh"
+sign_with_local_identity "$OUT"
 
 echo "Built: $OUT"

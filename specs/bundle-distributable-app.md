@@ -288,14 +288,24 @@ with environment:
 | `PYTHONHOME` | `<Resources>/python` |
 | `PATH` | `/opt/homebrew/bin:/usr/local/bin:$PATH` |
 
-Keep the existing `launchctl kickstart` branch for anyone with the LaunchAgent
-installed; the bundled spawn becomes the fallback.
+**Ordering matters, and today's code has it backwards.** `startDaemon()`
+currently tries `launchctl kickstart` *first* and only falls back to spawning
+scribed itself. Invert that: the bundled spawn becomes the primary path, and
+the `launchctl kickstart` branch stays only as a fallback for users who already
+installed the LaunchAgent.
 
-**Critical:** the daemon must stay a child of the app. TCC resolves the
-responsible process up the spawn chain, so the app's Screen Recording and
-Microphone grants only cover `syscap`/`ffmpeg` when the app spawns the daemon.
-A daemon started from a terminal inherits the *terminal's* TCC identity instead
-and will be denied. Do not move daemon startup to launchd.
+**Why:** TCC resolves the responsible process up the spawn chain, so the app's
+Screen Recording and Microphone grants cover `syscap`/`ffmpeg` **only when the
+app spawns the daemon**. Under launchd the daemon is a child of launchd and
+carries its own grants; a daemon started from a terminal inherits the
+*terminal's* identity. All three are workable, but only the app-spawned path is
+the one the bundle can set up on the user's behalf, so it must be preferred.
+
+Because those three cases exist, **never gate recording on the app's own
+preflight** — `CGPreflightScreenCaptureAccess()` describes this app, not
+whichever process TCC holds responsible for `syscap`. Treat a missing grant as
+a hint attached to a failure, never as a precondition (see
+`AppState.nudgeScreenRecordingAccess`).
 
 ### Step 5 — First-run setup window
 
@@ -475,8 +485,14 @@ ship.
 Each has a recommended answer. Proceed with it; flag the choice in the PR.
 
 1. **Should the daemon keep running when the app quits?**
-   *Recommended: no.* Terminate it on app exit. A daemon outliving its parent
-   loses the TCC responsibility chain and will be denied on the next record.
+   *Recommended: no* — terminate it on app exit, mainly so a stale daemon can't
+   outlive an upgrade.
+   **Verify before relying on the TCC argument.** It is tempting to say a daemon
+   outliving its parent "loses the responsibility chain," but responsibility is
+   assigned at exec time and is not obviously re-evaluated when the parent
+   exits — today's `nohup … &` spawn deliberately detaches and appears to work.
+   Test it (quit the app mid-recording, then record again) before writing any
+   code that depends on either answer.
 2. **Where should recordings live for a bundled user?**
    *Recommended: keep `~/Recordings/meetings`,* configurable via
    `config.json`. Changing the default would strand existing users' data.

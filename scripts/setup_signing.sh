@@ -20,16 +20,20 @@
 #   bash scripts/setup_signing.sh
 set -euo pipefail
 
-CN="Meeting Scribe Local Signing"
-KC_NAME="meeting-scribe-signing.keychain"
-KC_PATH="$HOME/Library/Keychains/$KC_NAME-db"
-KC_PASS="meetingscribe"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/signing.sh
+source "$HERE/scripts/signing.sh"
+
+CN="$SIGN_CN"
+KC_NAME="$SIGN_KC_NAME"
+KC_PATH="$SIGN_KC"
+KC_PASS="$SIGN_KC_PASS"
 # Kept outside the repo: this holds a private key, never commit it.
 STORE="$HOME/.config/meeting-scribe/signing"
 
-if security find-identity "$KC_NAME" 2>/dev/null | grep -qF "$CN"; then
+if have_signing_identity; then
     echo "✓ signing identity already present in $KC_NAME"
-    security find-identity "$KC_NAME" 2>/dev/null | grep -F "$CN"
+    security find-identity -p codesigning "$KC_PATH" 2>/dev/null | grep -F "$CN"
     exit 0
 fi
 
@@ -74,20 +78,39 @@ if [[ ! -f "$KC_PATH" ]]; then
 fi
 security unlock-keychain -p "$KC_PASS" "$KC_NAME"
 
-# -T /usr/bin/codesign + set-key-partition-list: let codesign use the key
-# without popping a GUI "allow access" dialog on every build.
+# -T /usr/bin/codesign + set-key-partition-list: let codesign — and only
+# codesign — use the key without popping a GUI "allow access" dialog on every
+# build. Deliberately NOT `-A`, which would hand the key to every process on
+# the machine, letting anything sign code that inherits this app's TCC grants.
 security import "$STORE/ms-signing.p12" -k "$KC_NAME" -P "$KC_PASS" \
-    -T /usr/bin/codesign -A
+    -T /usr/bin/codesign
 security set-key-partition-list -S apple-tool:,apple:,codesign: \
     -s -k "$KC_PASS" "$KC_NAME" >/dev/null 2>&1
 
-# Add to the user search list so `codesign -s` can find it.
+# Add to the user search list so `codesign -s` can find it. Read the current
+# entries into an array — keychain paths may contain spaces, which word
+# splitting would silently shred, dropping the user's other keychains.
 if ! security list-keychains -d user | grep -qF "$KC_NAME"; then
-    EXISTING=$(security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"$//')
-    # shellcheck disable=SC2086
-    security list-keychains -d user -s $EXISTING "$KC_PATH"
+    EXISTING=()
+    while IFS= read -r line; do
+        line="${line#"${line%%[![:space:]]*}"}"   # strip leading whitespace
+        line="${line#\"}"; line="${line%\"}"      # strip surrounding quotes
+        [[ -n "$line" ]] && EXISTING+=("$line")
+    done < <(security list-keychains -d user)
+    if [[ ${#EXISTING[@]} -gt 0 ]]; then
+        security list-keychains -d user -s "${EXISTING[@]}" "$KC_PATH"
+    else
+        security list-keychains -d user -s "$KC_PATH"
+    fi
 fi
 
 echo "✓ identity ready (the cert is self-signed and untrusted, which is fine —"
 echo "  codesign accepts it; only Gatekeeper distribution would need trust)"
-security find-identity "$KC_NAME" 2>/dev/null | grep -F "$CN"
+security find-identity -p codesigning "$KC_PATH" 2>/dev/null | grep -F "$CN"
+echo
+echo "NOTE: switching off ad-hoc changes the designated requirement, so any"
+echo "  Screen Recording grant you already have is now stale. After the next"
+echo "  build you will be asked for it once more. If macOS refuses to re-prompt"
+echo "  because System Settings still lists a stale entry, clear it with:"
+echo "      tccutil reset ScreenCapture com.meetingscribe.app"
+echo "  From then on the grant survives rebuilds."
