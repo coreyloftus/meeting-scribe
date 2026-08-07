@@ -1,5 +1,6 @@
 // Central observable state: daemon connection, live status, meetings list.
 // Subscribes to /v1/events (SSE) and falls back to 2s polling if the stream drops.
+import CoreGraphics
 import Foundation
 import SwiftUI
 
@@ -175,20 +176,56 @@ final class AppState: ObservableObject {
 
     // MARK: actions
 
-    private func run(_ label: String, _ op: @escaping () async throws -> Void) {
+    /// `hint` is appended only if the operation fails — guidance we suspect is
+    /// relevant but can't confirm, so it never fires on a working setup.
+    private func run(_ label: String, hint: String? = nil,
+                     _ op: @escaping () async throws -> Void) {
         Task {
             do {
                 try await op()
                 lastError = nil
             } catch {
-                lastError = "\(label): \(error.localizedDescription)"
+                var msg = "\(label): \(error.localizedDescription)"
+                if let hint { msg += "\n\n" + hint }
+                lastError = msg
             }
             await refreshStatus()
             await refreshMeetings()
         }
     }
 
-    func startRecording() { run("start") { [self] in try await client?.start() } }
+    static let screenRecordingHint = """
+        Meeting Scribe itself does not have Screen Recording permission, which \
+        may be the cause. Approve the system prompt, or grant it under System \
+        Settings > Privacy & Security > Screen Recording. macOS only applies \
+        the answer to processes started afterwards, so quit and relaunch \
+        Meeting Scribe and restart the background service. If scribed runs \
+        under launchd it holds its own grant — grant the permission to it \
+        instead of to this app.
+        """
+
+    /// Screen Recording is granted to whichever process TCC holds *responsible*
+    /// for `syscap`. That is this app only when the app spawned scribed itself
+    /// (`startDaemon()`'s fallback branch); with the LaunchAgent installed the
+    /// daemon is a child of launchd and carries its own grant, which we cannot
+    /// see from here. So this is a nudge, never a gate: raise the system prompt
+    /// if *we* lack the grant, then let /v1/start be the judge. Blocking on our
+    /// own preflight would lock out every working launchd setup.
+    ///
+    /// Returns whether this app holds the grant — used only to decide if the
+    /// permission hint is worth attaching to a failure.
+    private func nudgeScreenRecordingAccess() -> Bool {
+        if CGPreflightScreenCaptureAccess() { return true }
+        // Shows the system prompt; the answer lands too late for this attempt.
+        return CGRequestScreenCaptureAccess()
+    }
+
+    func startRecording() {
+        let granted = nudgeScreenRecordingAccess()
+        run("start", hint: granted ? nil : Self.screenRecordingHint) { [self] in
+            try await client?.start()
+        }
+    }
 
     func stopRecording() {
         stopping = true
