@@ -7,7 +7,7 @@ action). See base.py for the registry contract.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .base import OutputResult, REGISTRY, write_all, write_one  # noqa: F401
 
@@ -21,6 +21,7 @@ class Note:
     transcript: str
     audio_path: str | None = None
     user_notes: str | None = None   # notes typed by the user during the meeting
+    warnings: list[str] = field(default_factory=list)  # capture-quality caveats
 
     def full_markdown(self) -> str:
         parts = [
@@ -30,6 +31,9 @@ class Note:
         ]
         if self.audio_path:
             parts.append(f"_Audio: {self.audio_path}_")
+        if self.warnings:
+            parts.append("")
+            parts += [f"> ⚠️ {w}" for w in self.warnings]
         parts += ["", self.summary_md]
         if self.user_notes and self.user_notes.strip():
             parts += ["", "---", "", "## My Notes", "", self.user_notes.strip()]
