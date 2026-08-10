@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Embedded into the miccap binary's __TEXT,__info_plist section by
+     scripts/build_helper.sh. A command-line tool that opens the microphone
+     needs its own usage string: with none, TCC kills the process instead of
+     prompting, and Microphone has no "+" button in System Settings, so the
+     grant cannot be added by hand afterwards. -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.meetingscribe.miccap</string>
+    <key>CFBundleName</key>
+    <string>miccap</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Meeting Scribe records your microphone so meetings can be transcribed locally.</string>
+</dict>
+</plist>

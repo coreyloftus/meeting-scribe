@@ -4,11 +4,16 @@ We deliberately capture system audio and mic into TWO separate files at their
 own native sample rates:
 
   * system  -> ScreenCaptureKit helper (bin/syscap)
-  * mic      -> ffmpeg avfoundation
+  * mic     -> AVAudioEngine helper   (bin/miccap)
 
 They are resampled INDEPENDENTLY later (see audio.py). Nothing is ever joined
 at mismatched rates, so the old "underwater / half-speed" bug cannot recur.
 Keeping them separate is also what gives us Me/Them speaker labels for free.
+
+Mic capture used to be `ffmpeg -f avfoundation`. It was replaced because
+ffmpeg's avfoundation input drops roughly one sample in nine on this hardware
+while its timestamps advance at speed=1x — see helper/miccap.swift. ffmpeg is
+still used for resampling and level checks in audio.py, just not for capture.
 """
 from __future__ import annotations
 
@@ -26,6 +31,7 @@ from .config import Config, REPO_ROOT
 STATE_DIR = Path.home() / ".local" / "state" / "meeting-scribe"
 SESSION_FILE = STATE_DIR / "session.json"
 HELPER_BIN = REPO_ROOT / "bin" / "syscap"
+MIC_HELPER_BIN = REPO_ROOT / "bin" / "miccap"
 
 
 class RecorderError(Exception):
@@ -130,18 +136,19 @@ def start(cfg: Config) -> Session:
                              stdout=log, stderr=log, stdin=subprocess.DEVNULL)
         system_pid = p.pid
 
-    # --- mic via ffmpeg avfoundation ---------------------------------------
+    # --- mic via AVAudioEngine helper --------------------------------------
     if cfg.capture_mic:
+        if not MIC_HELPER_BIN.exists():
+            raise RecorderError(
+                f"Mic helper not built: {MIC_HELPER_BIN}\n"
+                f"Build it with:  bash scripts/build_helper.sh"
+            )
         mic = default_mic_device(cfg)
         mic_wav = str(base) + ".mic.wav"
-        log = open(str(base) + ".ffmpeg.log", "wb")
-        # No -ar here: capture at the device's native rate, resample later.
-        # -flush_packets 1: write every packet straight to disk — ffmpeg 8's
-        # stop path only flushes whole buffered chunks, which otherwise drops
-        # the last few seconds of the meeting.
+        log = open(str(base) + ".miccap.log", "wb")
+        # No rate flag: capture at the device's native rate, resample later.
         p = subprocess.Popen(
-            ["ffmpeg", "-nostdin", "-f", "avfoundation", "-i", f":{mic}",
-             "-ac", "1", "-flush_packets", "1", "-y", mic_wav],
+            [str(MIC_HELPER_BIN), mic_wav, "--device", mic, "--channels", "1"],
             stdout=log, stderr=log, stdin=subprocess.DEVNULL)
         mic_pid = p.pid
 
@@ -166,18 +173,22 @@ def start(cfg: Config) -> Session:
             f"then retry. Log: {base}.syscap.log")
     if mic_pid and not _alive(mic_pid):
         raise RecorderError(
-            f"Mic capture (ffmpeg) exited immediately. Check the input device. "
-            f"Log: {base}.ffmpeg.log")
+            "Mic capture exited immediately. Most likely the input device is "
+            "unavailable, or Microphone permission was denied.\n"
+            "Check System Settings > Privacy & Security > Microphone, "
+            f"then retry. Log: {base}.miccap.log")
 
     return session
 
 
 def _stop_pid(pid: int | None, timeout: float = 10.0) -> None:
-    """TERM, TERM again, then KILL. The double TERM is deliberate: Homebrew
-    ffmpeg 8 never acts on its first signal while capturing from avfoundation
-    (the graceful-stop flag isn't polled), but the second signal takes its
-    force-exit path, which still writes the WAV trailer ("Exiting normally,
-    received signal 15"). syscap exits cleanly on the first TERM."""
+    """TERM, TERM again, then KILL.
+
+    Both helpers finalize the WAV header on the first TERM, and this returns as
+    soon as the process is gone, so the escalation costs nothing in the normal
+    case. It is kept as insurance: a capture killed before it flushes leaves a
+    WAV whose header understates the data chunk, which is exactly how the old
+    ffmpeg mic files ended up unreadable by Python's `wave` module."""
     if not _alive(pid):
         return
     for sig, wait in ((signal.SIGTERM, 0.6),
