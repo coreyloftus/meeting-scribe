@@ -23,7 +23,7 @@ automatically into Notion and/or a local markdown vault.
  system  →  │ bin/syscap (Swift / SCK)  │ →  <stamp>.system.wav  ┐
             └──────────────────────────┘                        │  resample each
             ┌──────────────────────────┐                        │  independently
- mic     →  │ ffmpeg (avfoundation)     │ →  <stamp>.mic.wav     ┘  → 16 kHz mono
+ mic     →  │ bin/miccap (Swift / AVAE) │ →  <stamp>.mic.wav     ┘  → 16 kHz mono
             └──────────────────────────┘                        │
                                                                 ▼
                               whisper.cpp per channel  →  Me: … / Them: … transcript
@@ -79,7 +79,7 @@ $EDITOR ~/.config/meeting-scribe/config.json
 scribe doctor
 ```
 
-### Grant Screen Recording permission
+### Grant Screen Recording and Microphone permission
 
 ScreenCaptureKit needs **Screen Recording** permission for whatever terminal you
 run `scribe` from (Terminal, iTerm, VS Code, …):
@@ -88,6 +88,11 @@ run `scribe` from (Terminal, iTerm, VS Code, …):
 > then fully quit and reopen it.
 
 The first `scribe start` will fail with a clear message if this isn't granted.
+
+**Microphone** is prompted for on the first `scribe start` — allow it. Unlike
+Screen Recording, Microphone has no "+" button in System Settings, so it cannot
+be added by hand later; if you deny it, reset the decision with
+`tccutil reset Microphone` and start a recording again.
 
 ---
 
@@ -271,6 +276,8 @@ high-quality A2DP mode and the mic stays at full quality.
 | Symptom | Fix |
 |---|---|
 | `System-audio helper exited immediately` | Grant Screen Recording permission to your terminal, then restart it. |
+| `Mic capture exited immediately` | Microphone permission was denied, or the configured `mic_device` is gone. Check `.miccap.log` next to the recording; `tccutil reset Microphone` re-prompts. |
+| Mic channel is ~11% shorter than the system channel | An old recording made with the ffmpeg mic capture, which dropped roughly one sample in nine. Recordings made with `bin/miccap` track wall clock. |
 | `swiftc: ... SDK is not supported by the compiler` | Your Command Line Tools are out of date/mismatched. `softwareupdate -i "Command Line Tools for Xcode <version>"` (or reinstall via `xcode-select --install`), then re-run `scripts/build_helper.sh`. |
 | `whisper model not found` | Download a `ggml-*.bin` model and point `transcription.whisper_model` at it. |
 | System channel is silent | Make sure something was actually playing through your **system output** during the meeting. |
@@ -282,7 +289,8 @@ high-quality A2DP mode and the mic stays at full quality.
 
 ```
 helper/syscap.swift        ScreenCaptureKit system-audio capture (compiles to bin/syscap)
-scripts/build_helper.sh    Builds the helper
+helper/miccap.swift        AVAudioEngine microphone capture (compiles to bin/miccap)
+scripts/build_helper.sh    Builds both helpers
 scripts/build_app.sh       Builds MeetingScribe.app (menu-bar SwiftUI app)
 app/                       SwiftUI app: menu-bar badge, meetings window, live notes
 meeting_scribe/

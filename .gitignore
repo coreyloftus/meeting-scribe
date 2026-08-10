@@ -1,5 +1,6 @@
-# Compiled Swift helper (built locally via scripts/build_helper.sh)
+# Compiled Swift helpers (built locally via scripts/build_helper.sh)
 /bin/syscap
+/bin/miccap
 /bin/*.dSYM/
 
 # Real config with secrets — never commit. Ship config.example.json instead.
@@ -18,6 +19,8 @@ dist/
 /recordings/
 *.wav
 *.ffmpeg.log
+*.miccap.log
+*.syscap.log
 
 # macOS
 .DS_Store

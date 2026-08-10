@@ -26,7 +26,7 @@ from .client import DaemonClient, DaemonError
 from .config import Config, EXAMPLE_CONFIG, DEFAULT_USER_CONFIG
 from .daemon.db import STAMP_RE
 from .process import process
-from .recorder import HELPER_BIN
+from .recorder import HELPER_BIN, MIC_HELPER_BIN
 
 
 def _load(args) -> Config:
@@ -272,9 +272,10 @@ def cmd_doctor(args) -> int:
     for t, path in tools.items():
         print(f"  {_ok(bool(path))} {t}: {path or 'NOT FOUND'}")
 
-    helper = HELPER_BIN.exists()
-    print(f"  {_ok(helper)} system-audio helper: "
-          f"{HELPER_BIN if helper else 'NOT BUILT — run bash scripts/build_helper.sh'}")
+    for label, path in (("system-audio", HELPER_BIN), ("mic", MIC_HELPER_BIN)):
+        built = path.exists()
+        print(f"  {_ok(built)} {label} helper: "
+              f"{path if built else 'NOT BUILT — run bash scripts/build_helper.sh'}")
 
     model = cfg.whisper_model
     model_ok = bool(model and Path(model).is_file())

@@ -25,7 +25,7 @@ from .. import process as process_mod
 from .. import recorder
 from ..config import DEFAULT_USER_CONFIG
 from ..outputs import Note, REGISTRY, write_one
-from ..recorder import HELPER_BIN
+from ..recorder import HELPER_BIN, MIC_HELPER_BIN
 from . import DAEMON_VERSION
 from . import state
 from .db import Database, stamp_to_iso
@@ -521,8 +521,9 @@ def get_doctor():
     for tool in ("ffmpeg", "ffprobe", c.whisper_cli, "SwitchAudioSource"):
         path = shutil.which(tool)
         check(f"tool:{tool}", bool(path), path or "not found on PATH")
-    check("helper:syscap", HELPER_BIN.exists(),
-          str(HELPER_BIN) if HELPER_BIN.exists() else "not built — run scripts/build_helper.sh")
+    for label, path in (("syscap", HELPER_BIN), ("miccap", MIC_HELPER_BIN)):
+        check(f"helper:{label}", path.exists(),
+              str(path) if path.exists() else "not built — run scripts/build_helper.sh")
     model = c.whisper_model
     check("whisper_model", bool(model and Path(model).is_file()), str(model or "(unset)"))
     check("config", bool(c.source), str(c.source or "defaults only"))
@@ -562,7 +563,7 @@ def serve(host: str = state.DEFAULT_HOST, port: int | None = None) -> None:
     import uvicorn
     import signal as _signal
     # A daemon launched as a shell background job inherits SIGINT/SIGQUIT
-    # ignored, and ignored dispositions survive exec — so ffmpeg/syscap would
+    # ignored, and ignored dispositions survive exec — so the capture helpers would
     # never see our stop signal. Restore defaults before spawning anything.
     for _sig in (_signal.SIGINT, _signal.SIGQUIT):
         if _signal.getsignal(_sig) == _signal.SIG_IGN:
