@@ -139,9 +139,11 @@ def start(cfg: Config) -> Session:
         # -flush_packets 1: write every packet straight to disk — ffmpeg 8's
         # stop path only flushes whole buffered chunks, which otherwise drops
         # the last few seconds of the meeting.
+        # avfoundation drops ~10-15% of packets; pad gaps by pts to keep wall-clock time.
         p = subprocess.Popen(
             ["ffmpeg", "-nostdin", "-f", "avfoundation", "-i", f":{mic}",
-             "-ac", "1", "-flush_packets", "1", "-y", mic_wav],
+             "-ac", "1", "-af", "aresample=async=1:first_pts=0",
+             "-flush_packets", "1", "-y", mic_wav],
             stdout=log, stderr=log, stdin=subprocess.DEVNULL)
         mic_pid = p.pid
 
