@@ -1,6 +1,6 @@
 # meeting-scribe
 
-Record a meeting on your Mac, transcribe it **locally** with whisper.cpp, then use
+Record a meeting on your Mac, transcribe it **locally** with Parakeet (MLX), then use
 Claude to turn it into labelled notes, action items, and key decisions — filed
 automatically into Notion and/or a local markdown vault.
 
@@ -10,7 +10,7 @@ automatically into Notion and/or a local markdown vault.
 - **Speaker labels for free.** Your mic and the system audio are recorded to
   separate files, so the transcript is a real `Me:` / `Them:` dialogue.
 - **Local transcription.** Audio never leaves your machine for transcription —
-  whisper.cpp runs on-device. Only the (text) transcript is sent to Claude.
+  Parakeet runs on-device (Apple Silicon GPU). Only the (text) transcript is sent to Claude.
 - **Config-driven.** Model, API keys, prompts, and output destinations all live in
   a `config.json`. Bring your own keys.
 
@@ -26,7 +26,7 @@ automatically into Notion and/or a local markdown vault.
  mic     →  │ ffmpeg (avfoundation)     │ →  <stamp>.mic.wav     ┘  → 16 kHz mono
             └──────────────────────────┘                        │
                                                                 ▼
-                              whisper.cpp per channel  →  Me: … / Them: … transcript
+                                 Parakeet per channel  →  Me: … / Them: … transcript
                                                                 ▼
                                   Claude (Anthropic API)  →  slug + action-items summary
                                                                 ▼
@@ -43,6 +43,9 @@ macOS 13 (Ventura) or newer, plus:
 # CLI tools
 brew install ffmpeg whisper-cpp switchaudio-osx
 xcode-select --install   # provides swiftc to build the helper
+
+# Parakeet (the default engine) downloads its model from Hugging Face on first
+# use (~1.2 GB). The whisper models below are only needed for "engine": "whisper".
 
 # A whisper model (English base is a good default; medium is more accurate)
 mkdir -p ~/.local/share/whisper-cpp/models
@@ -202,6 +205,8 @@ the file **or** in the environment (`ANTHROPIC_API_KEY`, `NOTION_TOKEN` — env 
     "mic_device": null                   // null = current default input; or "MacBook Pro Microphone"
   },
   "transcription": {
+    "engine": "parakeet",                // or "whisper" (whisper.cpp)
+    "parakeet_model": "mlx-community/parakeet-tdt-0.6b-v2",
     "whisper_cli": "whisper-cli",
     "whisper_model": "~/.local/share/whisper-cpp/models/ggml-base.en.bin",
     "language": "auto",
@@ -290,7 +295,7 @@ meeting_scribe/
   client.py                HTTP client for the daemon (used by the CLI)
   recorder.py              Starts/stops the two capture processes; session state
   audio.py                 ffmpeg resample + level/quality checks (the bug fix lives here)
-  transcribe.py            whisper.cpp per-channel + Me/Them speaker labelling
+  transcribe.py            Parakeet/whisper.cpp per-channel + Me/Them speaker labelling
   llm.py                   Anthropic API: slug + summary (+ user-notes weaving)
   process.py               Pipeline stages: transcribe → summarise → write outputs
   outputs/                 Plugin registry: markdown, notion, gdrive, gdocs
