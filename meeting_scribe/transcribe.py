@@ -1,4 +1,4 @@
-"""Transcribe with whisper.cpp (whisper-cli), per channel, with speaker labels.
+"""Transcribe with Parakeet (MLX) or whisper.cpp, per channel, with speaker labels.
 
 Because mic and system audio were recorded to separate files, we can transcribe
 each one independently and tag every segment with WHO was speaking, then weave
@@ -117,6 +117,22 @@ def _parse_segments(json_path: Path, speaker: str) -> list[Segment]:
     return segs
 
 
+def _run_parakeet(cfg: Config, wav: Path, speaker: str) -> list[Segment]:
+    try:
+        import mlx.core as mx
+        from parakeet_mlx import from_pretrained
+    except ImportError as e:
+        raise TranscribeError(
+            "parakeet-mlx not installed. Run: .venv/bin/pip install -e .") from e
+    # Without a cap, MLX's GPU buffer cache holds ~6 GB for a 30-min channel.
+    mx.set_cache_limit(0)
+    model = from_pretrained(cfg.parakeet_model)
+    result = model.transcribe(str(wav), chunk_duration=120, overlap_duration=15)
+    return [Segment(start_ms=int(s.start * 1000), end_ms=int(s.end * 1000),
+                    text=s.text.strip(), speaker=speaker)
+            for s in result.sentences if s.text.strip()]
+
+
 def _whisper_wav_path(workdir: Path, speaker: str) -> Path:
     return workdir / f"{speaker.lower()}.16k.wav"
 
@@ -125,6 +141,8 @@ def transcribe_channel(cfg: Config, src_wav: Path, speaker: str, workdir: Path) 
     """Resample a single channel to 16 kHz mono and transcribe it."""
     whisper_wav = _whisper_wav_path(workdir, speaker)
     audio.to_whisper_wav(src_wav, whisper_wav)
+    if cfg.engine == "parakeet":
+        return _run_parakeet(cfg, whisper_wav, speaker)
     out_base = workdir / speaker.lower()
     _run_whisper(cfg, whisper_wav, out_base)
     return _parse_segments(out_base.with_suffix(".json"), speaker)

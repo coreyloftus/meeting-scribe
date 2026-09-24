@@ -111,6 +111,15 @@ class Config:
 
     # --- transcription ------------------------------------------------------
     @property
+    def engine(self) -> str:
+        return self.get("transcription", "engine", default="parakeet")
+
+    @property
+    def parakeet_model(self) -> str:
+        return self.get("transcription", "parakeet_model",
+                        default="mlx-community/parakeet-tdt-0.6b-v2")
+
+    @property
     def whisper_cli(self) -> str:
         return self.get("transcription", "whisper_cli", default="whisper-cli")
 

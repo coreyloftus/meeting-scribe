@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "anthropic>=0.40",
     "requests>=2.31",
+    "parakeet-mlx>=0.5",
 ]
 
 [project.optional-dependencies]

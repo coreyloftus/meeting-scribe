@@ -13,6 +13,8 @@
     "mic_device": null
   },
   "transcription": {
+    "engine": "parakeet",
+    "parakeet_model": "mlx-community/parakeet-tdt-0.6b-v2",
     "whisper_cli": "whisper-cli",
     "whisper_model": "~/.local/share/whisper-cpp/models/ggml-base.en.bin",
     "vad_model": "~/.local/share/whisper-cpp/models/ggml-silero-v5.1.2.bin",

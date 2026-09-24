@@ -16,6 +16,7 @@ isn't running — they fall back to the original in-process behavior.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import shutil
 import sys
 from pathlib import Path
@@ -276,9 +277,14 @@ def cmd_doctor(args) -> int:
     print(f"  {_ok(helper)} system-audio helper: "
           f"{HELPER_BIN if helper else 'NOT BUILT — run bash scripts/build_helper.sh'}")
 
-    model = cfg.whisper_model
-    model_ok = bool(model and Path(model).is_file())
-    print(f"  {_ok(model_ok)} whisper model: {model or '(unset)'}")
+    if cfg.engine == "parakeet":
+        pk = importlib.util.find_spec("parakeet_mlx") is not None
+        print(f"  {_ok(pk)} engine: parakeet ({cfg.parakeet_model})"
+              f"{'' if pk else ' — parakeet-mlx NOT INSTALLED'}")
+    else:
+        model = cfg.whisper_model
+        model_ok = bool(model and Path(model).is_file())
+        print(f"  {_ok(model_ok)} engine: whisper ({model or 'model unset'})")
 
     print(f"  {_ok(bool(cfg.source))} config file: {cfg.source or '(using defaults only)'}")
     if cfg.llm_backend == "claude_cli":
