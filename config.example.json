@@ -38,7 +38,9 @@
       "token": "",
       "database_id": "",
       "title_property": "Name",
-      "date_property": "Date"
+      "date_property": "Date",
+      "workspace_name": "",
+      "refresh_token": ""
     },
     "gdocs": {
       "enabled": false,
@@ -49,6 +51,9 @@
       "folder_id": "",
       "format": "md"
     }
+  },
+  "notion": {
+    "broker_url": ""
   },
   "google": {
     "client_id": "",
