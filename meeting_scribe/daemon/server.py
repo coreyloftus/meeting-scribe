@@ -548,9 +548,10 @@ def notion_callback(state: str = "", code: str = "", error: str = ""):
         return _oauth_page("Notion not connected", str(e), 400)
     BUS.publish("integrations_changed")
     ws = info.get("workspace_name") or "your workspace"
+    next_step = (f"Notes will go to {info['database_title']}." if info.get("database_title")
+                 else "Return to Meeting Scribe to pick a database.")
     return _oauth_page("Notion connected",
-                       f"Connected to {ws}. Return to Meeting Scribe to pick a database. "
-                       "You can close this tab.", 200)
+                       f"Connected to {ws}. {next_step} You can close this tab.", 200)
 
 
 @api.post("/v1/integrations/notion/disconnect")

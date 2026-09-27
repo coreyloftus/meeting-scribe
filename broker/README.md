@@ -36,6 +36,12 @@ Register these redirect URIs in the Notion integration:
 - `https://<broker-host>/api/notion/callback`
 - `http://localhost:3000/api/notion/callback` (local testing)
 
+Optional template: publish a "Meeting Scribe Notes" database (columns **Name**
+title + **Date** date) to the web and put its URL in the integration's
+**Notion URL for optional template**. Users who choose "Duplicate template"
+on the consent page get a copy, and the daemon selects it automatically
+from `duplicated_template_id` in the token response.
+
 Then set `DEFAULT_BROKER_URL` in `meeting_scribe/config.py` to `https://<broker-host>`
 (or `notion.broker_url` in `config.json`).
 

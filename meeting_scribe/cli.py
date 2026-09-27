@@ -366,7 +366,8 @@ def cmd_notion(args) -> int:
             continue
         if notion.get("connected"):
             print(f"✓ Notion connected: {notion.get('workspace_name') or 'ok'}")
-            print("  Pick a database in the app: Settings → Integrations → Notion.")
+            if not notion.get("database_id"):
+                print("  Pick a database in the app: Settings → Integrations → Notion.")
             return 0
     print("Timed out waiting for Notion approval.", file=sys.stderr)
     return 1
