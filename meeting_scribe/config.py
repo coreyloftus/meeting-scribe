@@ -8,6 +8,7 @@ Resolution order for the config file:
 Secrets may live in the file or in the environment; env always wins:
   ANTHROPIC_API_KEY  ->  anthropic.api_key
   NOTION_TOKEN       ->  outputs.notion.token
+  MEETING_SCRIBE_BROKER_URL -> notion.broker_url
 """
 from __future__ import annotations
 
@@ -19,6 +20,8 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_USER_CONFIG = Path.home() / ".config" / "meeting-scribe" / "config.json"
 EXAMPLE_CONFIG = REPO_ROOT / "config.example.json"
+# Hosted Notion OAuth broker (broker/). Empty until it is deployed.
+DEFAULT_BROKER_URL = ""
 
 
 class ConfigError(Exception):
@@ -167,6 +170,12 @@ class Config:
     def notion_token(self) -> str:
         return os.environ.get("NOTION_TOKEN") or self.get("outputs", "notion", "token", default="") or ""
 
+    @property
+    def notion_broker_url(self) -> str:
+        url = (os.environ.get("MEETING_SCRIBE_BROKER_URL")
+               or self.get("notion", "broker_url", default="") or DEFAULT_BROKER_URL)
+        return url.rstrip("/")
+
     OUTPUT_KEYS = ("markdown", "notion", "gdocs", "gdrive")
 
     def enabled_outputs(self) -> list[str]:
@@ -186,6 +195,20 @@ class Config:
     def google_token_path(self) -> Path:
         return expand(self.get("google", "token_path",
                                default="~/.config/meeting-scribe/google_token.json"))
+
+
+def write_patch(patch: dict) -> Path:
+    """Deep-merge `patch` into the user's config file on disk (not the example defaults)."""
+    source = find_config_path() or DEFAULT_USER_CONFIG
+    current: dict = {}
+    if source.is_file():
+        try:
+            current = json.loads(source.read_text())
+        except json.JSONDecodeError as e:
+            raise ConfigError(f"{source} is not valid JSON") from e
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text(json.dumps(_deep_merge(current, patch), indent=2) + "\n")
+    return source
 
 
 def load(path: str | Path | None = None) -> Config:

@@ -6,7 +6,7 @@ thread delivery goes through `loop.call_soon_threadsafe`.
 
 Event shape: {"type": <name>, ...payload}. Types used by the daemon:
     recording_started, recording_stopped, tick, job_progress,
-    meeting_updated, output_pushed
+    meeting_updated, output_pushed, integrations_changed
 """
 from __future__ import annotations
 

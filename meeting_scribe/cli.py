@@ -6,6 +6,7 @@ Subcommands:
   scribe process <path>   Process an existing recording or audio file
   scribe list             List captured meetings
   scribe daemon <cmd>     Manage the scribed background daemon
+  scribe notion connect   Connect Notion in the browser (via the daemon)
   scribe doctor           Check dependencies, permissions, and config
   scribe config [--init]  Show resolved config (or write a starter config.json)
 
@@ -19,6 +20,7 @@ import argparse
 import importlib.util
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from . import config as config_mod
@@ -301,7 +303,9 @@ def cmd_doctor(args) -> int:
     if "notion" in outs:
         tok = bool(cfg.notion_token)
         db = bool(cfg.get('outputs', 'notion', 'database_id'))
-        print(f"    {_ok(tok)} notion token   {_ok(db)} notion database_id")
+        ws = cfg.get('outputs', 'notion', 'workspace_name', default='')
+        print(f"    {_ok(tok)} notion token{f' ({ws})' if tok and ws else ''}   "
+              f"{_ok(db)} notion database_id")
     if "gdrive" in outs or "gdocs" in outs:
         gc = bool(cfg.google_client_id and cfg.google_client_secret)
         connected = cfg.google_token_path.is_file()
@@ -337,6 +341,34 @@ def cmd_google(args) -> int:
         print("Google token removed.")
         return 0
     print(f"Unknown google command: {args.google_command}", file=sys.stderr)
+    return 1
+
+
+# --- notion ------------------------------------------------------------------
+
+def cmd_notion(args) -> int:
+    d = DaemonClient()
+    if not d.is_up():
+        print("Error: the daemon is not running (scribe daemon start).", file=sys.stderr)
+        return 1
+    try:
+        url = d.notion_connect()["url"]
+    except DaemonError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    print(f"Opened your browser to approve Notion access. If it did not open, visit:\n  {url}")
+    deadline = time.monotonic() + 300
+    while time.monotonic() < deadline:
+        time.sleep(2)
+        try:
+            notion = d.integrations().get("notion", {})
+        except DaemonError:
+            continue
+        if notion.get("connected"):
+            print(f"✓ Notion connected: {notion.get('workspace_name') or 'ok'}")
+            print("  Pick a database in the app: Settings → Integrations → Notion.")
+            return 0
+    print("Timed out waiting for Notion approval.", file=sys.stderr)
     return 1
 
 
@@ -394,6 +426,10 @@ def build_parser() -> argparse.ArgumentParser:
     pg = sub.add_parser("google", help="Connect/disconnect Google (Docs & Drive outputs)")
     pg.add_argument("google_command", choices=["connect", "disconnect"])
     pg.set_defaults(func=cmd_google)
+
+    pn = sub.add_parser("notion", help="Connect Notion (one-click OAuth via the daemon)")
+    pn.add_argument("notion_command", choices=["connect"])
+    pn.set_defaults(func=cmd_notion)
 
     sub.add_parser("doctor", help="Check dependencies and config").set_defaults(func=cmd_doctor)
 

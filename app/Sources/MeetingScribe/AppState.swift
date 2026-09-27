@@ -13,6 +13,7 @@ final class AppState: ObservableObject {
     @Published var selectedMeetingID: String?
     @Published var detail: Meeting?                 // full detail for selection
     @Published var integrations: IntegrationsResponse?
+    @Published var integrationsChanges = 0          // bumps on each integrations_changed event
     @Published var doctorChecks: [DoctorCheck] = []
     @Published var elapsedSec: Int = 0
     @Published var lastError: String?
@@ -133,6 +134,11 @@ final class AppState: ObservableObject {
                 if let mid = e.data["meeting_id"] as? String, mid == selectedMeetingID {
                     await refreshDetail()
                 }
+            }
+        case "integrations_changed":
+            Task {
+                await refreshIntegrations()
+                integrationsChanges += 1
             }
         case "hello":
             Task { await refreshStatus() }

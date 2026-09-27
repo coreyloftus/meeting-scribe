@@ -69,8 +69,22 @@ struct IntegrationsResponse: Codable, Equatable {
         var connected: Bool
         var clientConfigured: Bool
     }
+    struct NotionInfo: Codable, Equatable {
+        var connected: Bool
+        var workspaceName: String
+        var databaseId: String
+        var oauthAvailable: Bool
+    }
     var outputs: [IntegrationInfo]
     var google: GoogleInfo
+    var notion: NotionInfo
+}
+
+struct NotionDatabase: Codable, Equatable, Identifiable, Hashable {
+    var id: String
+    var title: String
+    var titleProperty: String
+    var dateProperty: String
 }
 
 struct DoctorCheck: Codable, Equatable, Identifiable {
@@ -210,6 +224,25 @@ struct DaemonClient {
 
     func connectGoogle() async throws {
         _ = try await request("POST", "v1/integrations/google/connect")
+    }
+
+    func connectNotion() async throws {
+        _ = try await request("POST", "v1/integrations/notion/connect")
+    }
+
+    func disconnectNotion() async throws {
+        _ = try await request("POST", "v1/integrations/notion/disconnect")
+    }
+
+    struct NotionDatabasesEnvelope: Codable { var databases: [NotionDatabase] }
+    func notionDatabases() async throws -> [NotionDatabase] {
+        try await get("v1/integrations/notion/databases", as: NotionDatabasesEnvelope.self).databases
+    }
+
+    func setNotionDatabase(_ db: NotionDatabase) async throws {
+        _ = try await request("PUT", "v1/integrations/notion/database",
+                              body: ["id": db.id, "title_property": db.titleProperty,
+                                     "date_property": db.dateProperty])
     }
 
     struct DoctorEnvelope: Codable { var checks: [DoctorCheck] }

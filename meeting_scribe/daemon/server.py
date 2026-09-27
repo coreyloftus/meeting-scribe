@@ -2,28 +2,29 @@
 
 Run with `scribed serve` (or `scribe daemon serve`). Binds 127.0.0.1 only and
 requires `Authorization: Bearer <token>` (token in ~/.local/state/meeting-scribe/
-daemon.token) on every /v1 route.
+daemon.token) on every /v1 route except the Notion OAuth browser callback.
 """
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import os
 import shutil
 import socket
 import time
+import webbrowser
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .. import config as config_mod
 from .. import process as process_mod
 from .. import recorder
-from ..config import DEFAULT_USER_CONFIG
 from ..outputs import Note, REGISTRY, write_one
 from ..recorder import HELPER_BIN
 from . import DAEMON_VERSION
@@ -43,6 +44,7 @@ INTERRUPTED_STATUSES = ("queued", "transcribing", "summarizing", "writing_output
 SECRET_PATHS = (
     ("anthropic", "api_key"),
     ("outputs", "notion", "token"),
+    ("outputs", "notion", "refresh_token"),
     ("google", "client_secret"),
 )
 REDACTED = "•••"
@@ -249,8 +251,9 @@ def _reconcile_safely() -> None:
         print(f"[scribed] startup reconcile failed: {e}")
 
 
-app = FastAPI(title="scribed", version=DAEMON_VERSION, lifespan=lifespan,
-              dependencies=[Depends(require_token)])
+app = FastAPI(title="scribed", version=DAEMON_VERSION, lifespan=lifespan)
+# Every route needs the bearer token except the Notion OAuth callback (a browser redirect).
+api = APIRouter(dependencies=[Depends(require_token)])
 
 
 class PushBody(BaseModel):
@@ -266,7 +269,7 @@ class ReprocessBody(BaseModel):
     options: dict | None = None
 
 
-@app.get("/v1/status")
+@api.get("/v1/status")
 def get_status():
     active = JOBS.active()
     return {
@@ -278,7 +281,7 @@ def get_status():
     }
 
 
-@app.get("/v1/events")
+@api.get("/v1/events")
 async def get_events():
     async def stream():
         q = BUS.subscribe()
@@ -296,7 +299,7 @@ async def get_events():
                              headers={"Cache-Control": "no-cache"})
 
 
-@app.post("/v1/start")
+@api.post("/v1/start")
 def post_start():
     try:
         s = recorder.start(cfg())
@@ -310,7 +313,7 @@ def post_start():
     return {"meeting": meeting_public(DB.get_meeting(mid))}
 
 
-@app.post("/v1/stop")
+@api.post("/v1/stop")
 def post_stop():
     t0 = time.monotonic()
     try:
@@ -334,12 +337,12 @@ def post_stop():
     return {"meeting_id": mid, "job_id": job.id}
 
 
-@app.get("/v1/meetings")
+@api.get("/v1/meetings")
 def list_meetings(limit: int = 100, offset: int = 0, q: str | None = None):
     return {"meetings": [meeting_public(m) for m in DB.list_meetings(limit, offset, q)]}
 
 
-@app.get("/v1/meetings/{meeting_id}")
+@api.get("/v1/meetings/{meeting_id}")
 def get_meeting(meeting_id: str):
     m = DB.get_meeting(meeting_id)
     if m is None:
@@ -347,7 +350,7 @@ def get_meeting(meeting_id: str):
     return {"meeting": meeting_detail(m)}
 
 
-@app.put("/v1/meetings/{meeting_id}/notes")
+@api.put("/v1/meetings/{meeting_id}/notes")
 def put_meeting_notes(meeting_id: str, body: NotesBody):
     m = DB.get_meeting(meeting_id)
     if m is None:
@@ -363,7 +366,7 @@ def put_meeting_notes(meeting_id: str, body: NotesBody):
     return {"ok": True, "notes_path": str(notes_path)}
 
 
-@app.put("/v1/session/notes")
+@api.put("/v1/session/notes")
 def put_session_notes(body: NotesBody):
     s = recorder.load_session()
     if s is None or not recorder.is_recording():
@@ -371,7 +374,7 @@ def put_session_notes(body: NotesBody):
     return put_meeting_notes(Path(s.base).name, body)
 
 
-@app.post("/v1/meetings/{meeting_id}/reprocess")
+@api.post("/v1/meetings/{meeting_id}/reprocess")
 def post_reprocess(meeting_id: str, body: ReprocessBody | None = None):
     m = DB.get_meeting(meeting_id)
     if m is None:
@@ -387,7 +390,7 @@ def post_reprocess(meeting_id: str, body: ReprocessBody | None = None):
     return {"job_id": job.id}
 
 
-@app.post("/v1/meetings/{meeting_id}/push")
+@api.post("/v1/meetings/{meeting_id}/push")
 def post_push(meeting_id: str, body: PushBody):
     m = DB.get_meeting(meeting_id)
     if m is None:
@@ -401,7 +404,7 @@ def post_push(meeting_id: str, body: PushBody):
     return {"job_id": job.id}
 
 
-@app.delete("/v1/meetings/{meeting_id}")
+@api.delete("/v1/meetings/{meeting_id}")
 def delete_meeting(meeting_id: str, delete_files: bool = False):
     m = DB.get_meeting(meeting_id)
     if m is None:
@@ -447,7 +450,7 @@ def _del_path(d: dict, path: tuple) -> None:
         d.pop(path[-1], None)
 
 
-@app.get("/v1/config")
+@api.get("/v1/config")
 def get_config():
     c = cfg()
     data = json.loads(json.dumps(c.data))  # deep copy
@@ -457,27 +460,20 @@ def get_config():
     return {"config": data, "source": str(c.source) if c.source else None}
 
 
-@app.put("/v1/config")
+@api.put("/v1/config")
 def put_config(body: dict):
-    c = cfg()
-    target = c.source or DEFAULT_USER_CONFIG
-    current: dict = {}
-    if target.is_file():
-        try:
-            current = json.loads(target.read_text())
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=500, detail=f"{target} is not valid JSON")
     # Don't let the redaction placeholder overwrite a real secret.
     for path in SECRET_PATHS:
         if _get_path(body, path) == REDACTED:
             _del_path(body, path)
-    merged = config_mod._deep_merge(current, body)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(merged, indent=2) + "\n")
+    try:
+        config_mod.write_patch(body)
+    except config_mod.ConfigError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     return get_config()
 
 
-@app.get("/v1/integrations")
+@api.get("/v1/integrations")
 def get_integrations():
     c = cfg()
     enabled = set(c.enabled_outputs())
@@ -492,10 +488,14 @@ def get_integrations():
     google_connected = c.google_token_path.is_file()
     return {"outputs": items,
             "google": {"connected": google_connected,
-                       "client_configured": bool(c.google_client_id and c.google_client_secret)}}
+                       "client_configured": bool(c.google_client_id and c.google_client_secret)},
+            "notion": {"connected": bool(c.notion_token),
+                       "workspace_name": c.get("outputs", "notion", "workspace_name", default="") or "",
+                       "database_id": c.get("outputs", "notion", "database_id", default="") or "",
+                       "oauth_available": bool(c.notion_broker_url)}}
 
 
-@app.post("/v1/integrations/google/connect")
+@api.post("/v1/integrations/google/connect")
 def google_connect():
     c = cfg()
     if not (c.google_client_id and c.google_client_secret):
@@ -510,7 +510,79 @@ def google_connect():
     return {"ok": True, **info}
 
 
-@app.get("/v1/doctor")
+class NotionDatabaseBody(BaseModel):
+    id: str
+    title_property: str = "Name"
+    date_property: str = ""
+
+
+@api.post("/v1/integrations/notion/connect")
+def notion_connect(request: Request):
+    from ..integrations import notion_auth
+    try:
+        url = notion_auth.start(cfg(), request.url.port or state.DEFAULT_PORT)
+    except notion_auth.NotionAuthError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    webbrowser.open(url)
+    return {"ok": True, "url": url}
+
+
+def _oauth_page(title: str, body: str, status: int) -> HTMLResponse:
+    close = "<script>window.close()</script>" if status < 300 else ""
+    return HTMLResponse(status_code=status, content=(
+        f"<!doctype html><meta charset=utf-8><title>{html.escape(title)}</title>"
+        "<body style='font:16px -apple-system,sans-serif;max-width:32em;margin:4em auto'>"
+        f"<h2>{html.escape(title)}</h2><p>{html.escape(body)}</p>{close}</body>"))
+
+
+# No bearer token: the browser lands here from the broker. The single-use state is the guard.
+@app.get("/v1/integrations/notion/callback", include_in_schema=False)
+def notion_callback(state: str = "", code: str = "", error: str = ""):
+    from ..integrations import notion_auth
+    if error:
+        return _oauth_page("Notion not connected",
+                           f"Notion returned: {error}. Try again from Meeting Scribe Settings.", 400)
+    try:
+        info = notion_auth.finish(cfg(), code, state)
+    except notion_auth.NotionAuthError as e:
+        return _oauth_page("Notion not connected", str(e), 400)
+    BUS.publish("integrations_changed")
+    ws = info.get("workspace_name") or "your workspace"
+    return _oauth_page("Notion connected",
+                       f"Connected to {ws}. Return to Meeting Scribe to pick a database. "
+                       "You can close this tab.", 200)
+
+
+@api.post("/v1/integrations/notion/disconnect")
+def notion_disconnect():
+    from ..integrations import notion_auth
+    notion_auth.disconnect(cfg())
+    BUS.publish("integrations_changed")
+    return {"ok": True}
+
+
+@api.get("/v1/integrations/notion/databases")
+def notion_databases():
+    from ..integrations import notion_auth
+    c = cfg()
+    if not c.notion_token:
+        raise HTTPException(status_code=409, detail="Notion is not connected")
+    try:
+        return {"databases": notion_auth.list_databases(c)}
+    except notion_auth.NotionAuthError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@api.put("/v1/integrations/notion/database")
+def notion_set_database(body: NotionDatabaseBody):
+    config_mod.write_patch({"outputs": {"notion": {
+        "database_id": body.id, "title_property": body.title_property,
+        "date_property": body.date_property}}})
+    BUS.publish("integrations_changed")
+    return {"ok": True}
+
+
+@api.get("/v1/doctor")
 def get_doctor():
     c = cfg()
     checks = []
@@ -541,6 +613,9 @@ def get_doctor():
           "cannot be verified from here — if system capture dies instantly, grant "
           "Screen Recording to the process that runs scribed")
     return {"checks": checks, "daemon_version": DAEMON_VERSION}
+
+
+app.include_router(api)
 
 
 # --- entry point ---------------------------------------------------------------------

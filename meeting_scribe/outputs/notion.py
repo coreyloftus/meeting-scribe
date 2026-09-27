@@ -10,6 +10,7 @@ import re
 
 import requests
 
+from .. import config as config_mod
 from ..config import Config
 from .base import OutputResult
 
@@ -96,16 +97,22 @@ def write(cfg: Config, note, options: dict | None = None) -> OutputResult:
     blocks.append(_block("heading_2", "Full Transcript"))
     blocks += markdown_to_blocks(note.transcript)
 
+    properties = {title_prop: {"title": _rich_text(note.title)}}
+    if date_prop:  # a database with no date column files the page without one
+        properties[date_prop] = {"date": {"start": note.date}}
     payload = {
         "parent": {"database_id": database_id},
-        "properties": {
-            title_prop: {"title": _rich_text(note.title)},
-            date_prop: {"date": {"start": note.date}},
-        },
+        "properties": properties,
         "children": blocks[:MAX_CHILDREN],
     }
 
     resp = requests.post(f"{NOTION_API}/pages", headers=_headers(token), json=payload, timeout=30)
+    if resp.status_code == 401:
+        from ..integrations import notion_auth
+        if not notion_auth.refresh(cfg):
+            raise NotionError("Notion access expired — reconnect in Settings.")
+        token = config_mod.load(cfg.source).notion_token
+        resp = requests.post(f"{NOTION_API}/pages", headers=_headers(token), json=payload, timeout=30)
     if resp.status_code >= 300:
         raise NotionError(f"create page failed ({resp.status_code}): {resp.text[:300]}")
     page = resp.json()

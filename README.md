@@ -59,7 +59,7 @@ curl -L -o ~/.local/share/whisper-cpp/models/ggml-silero-v5.1.2.bin \
 ```
 
 You'll also need an **Anthropic API key** (<https://console.anthropic.com>), and —
-if you want Notion output — a **Notion integration token** and a database ID.
+if you want Notion output — a Notion account (connect it from the app's Settings).
 
 ---
 
@@ -133,7 +133,7 @@ trade-off: if you walk out of the room, your side goes quiet in the recording.
 
 ## Desktop app & daemon (Granola-style)
 
-The menu-bar app and the `scribed` daemon add live status, background
+The app (Dock icon + menu-bar badge) and the `scribed` daemon add live status, background
 processing, a meetings browser, live in-meeting notes, and one-click pushes.
 See `docs/desktop-app-spec.md` for the full design.
 
@@ -141,7 +141,7 @@ See `docs/desktop-app-spec.md` for the full design.
 # install python deps for the daemon (+ Google outputs)
 .venv/bin/pip install -e ".[daemon,google]"
 
-# build & run the menu-bar app (starts the daemon itself if needed)
+# build & run the app (starts the daemon itself if needed)
 bash scripts/build_app.sh --install
 open /Applications/MeetingScribe.app
 
@@ -244,6 +244,19 @@ Either way, only the text transcript is sent to Claude — never the audio.
 
 ### Notion setup
 
+1. In the app, open **Settings → Integrations → Notion → Connect Notion**.
+2. Approve access in the browser and select your meetings database on the Notion page.
+3. Back in Settings, pick that database from the **Database** menu.
+
+From the CLI, `scribe notion connect` does steps 1–2; pick the database in the app.
+To share more pages later, click **Connect Notion** again and select them.
+
+One-click connect goes through a small hosted broker (`broker/`) that holds the
+Notion OAuth client secret. Its URL comes from `notion.broker_url` in config
+(or `MEETING_SCRIBE_BROKER_URL`); if none is set, Settings shows only the manual fields.
+
+#### Manual setup (advanced)
+
 1. Create an internal integration at <https://www.notion.com/my-integrations> and
    copy its token (`ntn_…` / `secret_…`).
 2. Open the target database → **⋯ → Connections → add your integration**.
@@ -251,6 +264,7 @@ Either way, only the text transcript is sent to Claude — never the audio.
    (`notion.so/<workspace>/<DATABASE_ID>?v=…`).
 4. Set `outputs.notion.enabled: true`, fill in `token` and `database_id`, and make
    sure `title_property` / `date_property` match your database's column names.
+   In the app these fields are under **Advanced: use an internal integration token**.
 
 The Notion writer talks to the Notion REST API directly — it does **not** depend on
 Claude Code or any MCP server, so it's fully portable.
@@ -288,8 +302,10 @@ high-quality A2DP mode and the mic stays at full quality.
 ```
 helper/syscap.swift        ScreenCaptureKit system-audio capture (compiles to bin/syscap)
 scripts/build_helper.sh    Builds the helper
-scripts/build_app.sh       Builds MeetingScribe.app (menu-bar SwiftUI app)
-app/                       SwiftUI app: menu-bar badge, meetings window, live notes
+scripts/build_app.sh       Builds MeetingScribe.app (SwiftUI app)
+scripts/make_icon.sh       Regenerates app/Resources/AppIcon.icns
+app/                       SwiftUI app: Dock icon, menu-bar badge, meetings window, live notes
+broker/                    Stateless Vercel broker for Notion OAuth (holds the client secret)
 meeting_scribe/
   cli.py                   `scribe` entry point (daemon-aware; --local fallback)
   client.py                HTTP client for the daemon (used by the CLI)
@@ -299,7 +315,7 @@ meeting_scribe/
   llm.py                   Anthropic API: slug + summary (+ user-notes weaving)
   process.py               Pipeline stages: transcribe → summarise → write outputs
   outputs/                 Plugin registry: markdown, notion, gdrive, gdocs
-  integrations/            google_auth.py — desktop OAuth + Drive upload helper
+  integrations/            google_auth.py (desktop OAuth + Drive upload), notion_auth.py (Notion OAuth via broker/)
   daemon/                  scribed: FastAPI server, SQLite index, job queue, SSE, launchd
 config.example.json        Template config
 ```

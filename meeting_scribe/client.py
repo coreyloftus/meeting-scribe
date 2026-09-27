@@ -77,5 +77,11 @@ class DaemonClient:
         return self.request("POST", f"/v1/meetings/{meeting_id}/push",
                             json_body={"target": target, "options": options})
 
+    def integrations(self) -> dict:
+        return self.request("GET", "/v1/integrations")
+
+    def notion_connect(self) -> dict:
+        return self.request("POST", "/v1/integrations/notion/connect")
+
     def doctor(self) -> dict:
         return self.request("GET", "/v1/doctor")
