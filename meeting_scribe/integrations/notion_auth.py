@@ -8,6 +8,10 @@ for a token via the broker's /api/notion/token.
 
 The token lands in outputs.notion.token — the same key the manual
 internal-integration flow uses — so notion.write() needs no special case.
+
+If the user chooses to duplicate the integration's template during consent,
+the token response carries `duplicated_template_id` and we select that
+database automatically.
 """
 from __future__ import annotations
 
@@ -23,6 +27,8 @@ from ..config import Config
 from ..outputs.notion import NOTION_API, _headers
 
 STATE_TTL_SEC = 600
+TEMPLATE_RETRIES = 5          # Notion may not have finished duplicating the template yet
+TEMPLATE_RETRY_SEC = 2.0
 
 _pending: dict[str, float] = {}   # nonce -> expiry (monotonic)
 _lock = threading.Lock()
@@ -84,13 +90,46 @@ def _save_tokens(data: dict, **extra) -> None:
 
 
 def finish(cfg: Config, code: str, state: str) -> dict:
-    """Check the single-use state, trade the code for a token, save it. Returns {workspace_name}."""
+    """Check the single-use state, trade the code for a token, save it.
+
+    Returns {workspace_name, database_title}; database_title is set only when
+    the user duplicated the template and we selected the new database."""
     if not _consume(state):
         raise NotionAuthError("This sign-in link is invalid or expired. Start again from Settings.")
     data = _exchange(cfg, {"code": code})
     workspace = data.get("workspace_name") or ""
-    _save_tokens(data, workspace_name=workspace, enabled=True)
-    return {"workspace_name": workspace}
+    extra: dict = {"workspace_name": workspace, "enabled": True}
+    db = None
+    if data.get("duplicated_template_id"):
+        db = _template_database(data["access_token"], data["duplicated_template_id"])
+    if db:
+        extra.update(database_id=db["id"], title_property=db["title_property"],
+                     date_property=db["date_property"])
+    _save_tokens(data, **extra)
+    return {"workspace_name": workspace, "database_title": db["title"] if db else ""}
+
+
+def _template_database(token: str, template_id: str) -> dict | None:
+    """The database in the duplicated template: the template itself, or its first child database."""
+    for attempt in range(TEMPLATE_RETRIES):
+        if attempt:
+            time.sleep(TEMPLATE_RETRY_SEC)
+        try:
+            r = requests.get(f"{NOTION_API}/databases/{template_id}", headers=_headers(token), timeout=15)
+            if r.status_code < 300:
+                return _database_info(r.json())
+            r = requests.get(f"{NOTION_API}/blocks/{template_id}/children", headers=_headers(token),
+                             params={"page_size": 100}, timeout=15)
+            if r.status_code < 300:
+                child = next((b["id"] for b in r.json().get("results", [])
+                              if b.get("type") == "child_database"), None)
+                if child:
+                    r = requests.get(f"{NOTION_API}/databases/{child}", headers=_headers(token), timeout=15)
+                    if r.status_code < 300:
+                        return _database_info(r.json())
+        except requests.RequestException:
+            pass
+    return None
 
 
 def refresh(cfg: Config) -> bool:
@@ -116,6 +155,16 @@ def _plain(rich: list) -> str:
     return "".join(t.get("plain_text", "") for t in rich or [])
 
 
+def _database_info(db: dict) -> dict:
+    props = db.get("properties") or {}
+    return {
+        "id": db["id"],
+        "title": _plain(db.get("title")) or "Untitled",
+        "title_property": next((n for n, p in props.items() if p.get("type") == "title"), ""),
+        "date_property": next((n for n, p in props.items() if p.get("type") == "date"), ""),
+    }
+
+
 def list_databases(cfg: Config) -> list[dict]:
     """Databases shared with the integration, with their title and first date property."""
     token = cfg.notion_token
@@ -128,14 +177,7 @@ def list_databases(cfg: Config) -> list[dict]:
         if r.status_code >= 300:
             raise NotionAuthError(f"Notion search failed ({r.status_code}): {r.text[:200]}")
         data = r.json()
-        for db in data.get("results", []):
-            props = db.get("properties") or {}
-            out.append({
-                "id": db["id"],
-                "title": _plain(db.get("title")) or "Untitled",
-                "title_property": next((n for n, p in props.items() if p.get("type") == "title"), ""),
-                "date_property": next((n for n, p in props.items() if p.get("type") == "date"), ""),
-            })
+        out += [_database_info(db) for db in data.get("results", [])]
         if not data.get("has_more") or not data.get("next_cursor"):
             return out
         body["start_cursor"] = data["next_cursor"]

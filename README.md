@@ -245,15 +245,17 @@ Either way, only the text transcript is sent to Claude — never the audio.
 ### Notion setup
 
 1. In the app, open **Settings → Integrations → Notion → Connect Notion**.
-2. Approve access in the browser and select your meetings database on the Notion page.
-3. Back in Settings, pick that database from the **Database** menu.
+2. Approve access in the browser. Choose **Duplicate template** to get a ready
+   "Meeting Scribe Notes" database — Meeting Scribe selects it for you and you're done.
+   Or select an existing database of yours on the Notion page instead.
+3. If you picked your own database, choose it from the **Database** menu in Settings.
 
 From the CLI, `scribe notion connect` does steps 1–2; pick the database in the app.
 To share more pages later, click **Connect Notion** again and select them.
 
 One-click connect goes through a small hosted broker (`broker/`) that holds the
-Notion OAuth client secret. Its URL comes from `notion.broker_url` in config
-(or `MEETING_SCRIBE_BROKER_URL`); if none is set, Settings shows only the manual fields.
+Notion OAuth client secret. It defaults to `https://notion-broker.vercel.app`;
+override with `notion.broker_url` in config (or `MEETING_SCRIBE_BROKER_URL`).
 
 #### Manual setup (advanced)
 

@@ -20,8 +20,8 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_USER_CONFIG = Path.home() / ".config" / "meeting-scribe" / "config.json"
 EXAMPLE_CONFIG = REPO_ROOT / "config.example.json"
-# Hosted Notion OAuth broker (broker/). Empty until it is deployed.
-DEFAULT_BROKER_URL = ""
+# Hosted Notion OAuth broker (broker/).
+DEFAULT_BROKER_URL = "https://notion-broker.vercel.app"
 
 
 class ConfigError(Exception):
