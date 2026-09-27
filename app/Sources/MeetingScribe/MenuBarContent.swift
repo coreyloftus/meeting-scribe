@@ -2,7 +2,6 @@ import SwiftUI
 
 struct MenuBarContent: View {
     @EnvironmentObject var state: AppState
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -67,8 +66,7 @@ struct MenuBarContent: View {
     }
 
     private func openMain() {
-        openWindow(id: "main")
-        NSApp.activate(ignoringOtherApps: true)
+        state.openMainWindow?()
     }
 
     private func statusIcon(_ m: Meeting) -> String {

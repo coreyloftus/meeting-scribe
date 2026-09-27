@@ -18,6 +18,8 @@ final class AppState: ObservableObject {
     @Published var lastError: String?
     @Published var searchQuery: String = ""
     @Published var stopping = false
+    /// Set by MenuBarLabel, which has access to SwiftUI's openWindow action.
+    var openMainWindow: (() -> Void)?
 
     private var eventTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?

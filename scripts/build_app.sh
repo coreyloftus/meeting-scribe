@@ -22,6 +22,8 @@ echo "→ assembling bundle at $OUT"
 rm -rf "$OUT"
 mkdir -p "$OUT/Contents/MacOS" "$OUT/Contents/Resources"
 cp "$BIN" "$OUT/Contents/MacOS/MeetingScribe"
+# Generated once by scripts/make_icon.sh and committed.
+cp "$APP_SRC/Resources/AppIcon.icns" "$OUT/Contents/Resources/AppIcon.icns"
 
 cat > "$OUT/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -45,8 +47,7 @@ cat > "$OUT/Contents/Info.plist" <<'PLIST'
          is a child of launchd, not of us, and carries its own grant.) -->
     <key>NSMicrophoneUsageDescription</key>
     <string>Meeting Scribe records your microphone to transcribe meetings.</string>
-    <!-- Menu-bar-only app: no Dock icon; the window opens on demand. -->
-    <key>LSUIElement</key>               <true/>
+    <key>CFBundleIconFile</key>          <string>AppIcon</string>
     <key>NSHighResolutionCapable</key>   <true/>
 </dict>
 </plist>
