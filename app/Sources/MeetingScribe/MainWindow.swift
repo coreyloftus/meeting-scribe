@@ -270,7 +270,7 @@ struct MeetingDetailView: View {
     @ViewBuilder
     private func header(_ m: Meeting) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(m.displayTitle).font(.title.bold())
+            Text(m.displayTitle).font(.title.bold()).textSelection(.enabled)
             HStack(spacing: 10) {
                 StatusChip(status: m.status)
                 Text(m.startedAt?.replacingOccurrences(of: "T", with: "  ") ?? m.id)
@@ -281,6 +281,8 @@ struct MeetingDetailView: View {
                 Menu {
                     Button("Reprocess (re-transcribe & summarize)") { state.reprocess(m.id) }
                     Button("Reveal in Finder") { state.revealInFinder(m) }
+                    Button("Copy Transcript Path") { state.copyTranscriptPath(m) }
+                        .disabled(m.basePath == nil)
                     Divider()
                     Button("Delete…", role: .destructive) { confirmDelete = true }
                 } label: {
@@ -419,41 +421,38 @@ struct MarkdownBlock: View {
     let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, raw in
-                line(raw)
-            }
-        }
-        .textSelection(.enabled)
+        Text(rendered).textSelection(.enabled)
     }
 
-    @ViewBuilder
-    private func line(_ raw: String) -> some View {
-        let s = raw.trimmingCharacters(in: .whitespaces)
-        if s.isEmpty {
-            Spacer().frame(height: 2)
-        } else if s == "---" {
-            Divider()
-        } else if s.hasPrefix("### ") {
-            Text(inline(String(s.dropFirst(4)))).font(.headline)
-        } else if s.hasPrefix("## ") {
-            Text(inline(String(s.dropFirst(3)))).font(.title3.bold()).padding(.top, 6)
-        } else if s.hasPrefix("# ") {
-            Text(inline(String(s.dropFirst(2)))).font(.title2.bold()).padding(.top, 6)
-        } else if s.hasPrefix("- [ ] ") || s.hasPrefix("- [x] ") || s.hasPrefix("- [X] ") {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: s.hasPrefix("- [ ]") ? "square" : "checkmark.square")
-                    .foregroundStyle(.secondary)
-                Text(inline(String(s.dropFirst(6))))
-            }
-        } else if s.hasPrefix("- ") || s.hasPrefix("* ") {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("•").foregroundStyle(.secondary)
-                Text(inline(String(s.dropFirst(2))))
-            }
-        } else {
-            Text(inline(s))
+    // One Text so selection spans every line, not just one.
+    private var rendered: AttributedString {
+        var out = AttributedString()
+        for (i, raw) in text.components(separatedBy: "\n").enumerated() {
+            if i > 0 { out += AttributedString("\n") }
+            out += line(raw)
         }
+        return out
+    }
+
+    private func line(_ raw: String) -> AttributedString {
+        let s = raw.trimmingCharacters(in: .whitespaces)
+        if s.isEmpty { return AttributedString("") }
+        if s == "---" { return AttributedString("────────") }
+        if s.hasPrefix("### ") { return styled(String(s.dropFirst(4)), .headline) }
+        if s.hasPrefix("## ") { return styled(String(s.dropFirst(3)), .title3.bold()) }
+        if s.hasPrefix("# ") { return styled(String(s.dropFirst(2)), .title2.bold()) }
+        if s.hasPrefix("- [ ] ") { return AttributedString("☐ ") + inline(String(s.dropFirst(6))) }
+        if s.hasPrefix("- [x] ") || s.hasPrefix("- [X] ") {
+            return AttributedString("☑ ") + inline(String(s.dropFirst(6)))
+        }
+        if s.hasPrefix("- ") || s.hasPrefix("* ") { return AttributedString("• ") + inline(String(s.dropFirst(2))) }
+        return inline(s)
+    }
+
+    private func styled(_ s: String, _ font: Font) -> AttributedString {
+        var a = inline(s)
+        a.font = font
+        return a
     }
 
     private func inline(_ s: String) -> AttributedString {

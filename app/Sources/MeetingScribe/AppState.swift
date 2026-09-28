@@ -260,4 +260,10 @@ final class AppState: ObservableObject {
         let dir = (base as NSString).deletingLastPathComponent
         NSWorkspace.shared.selectFile(base + ".system.wav", inFileViewerRootedAtPath: dir)
     }
+
+    func copyTranscriptPath(_ meeting: Meeting) {
+        guard let base = meeting.basePath else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(base + ".transcript.txt", forType: .string)
+    }
 }
