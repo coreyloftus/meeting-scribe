@@ -255,6 +255,20 @@ final class AppState: ObservableObject {
         Task { try? await client?.saveNotes(meetingID, notes: text) }
     }
 
+    func renameMeeting(_ id: String, title: String) {
+        run("rename") { [self] in
+            try await client?.updateMeeting(id, title: title)
+            await refreshDetail()
+        }
+    }
+
+    func saveSummary(_ id: String, text: String) {
+        run("save summary") { [self] in
+            try await client?.updateMeeting(id, summaryMd: text)
+            await refreshDetail()
+        }
+    }
+
     func revealInFinder(_ meeting: Meeting) {
         guard let base = meeting.basePath else { return }
         let dir = (base as NSString).deletingLastPathComponent

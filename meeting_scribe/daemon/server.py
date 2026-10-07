@@ -146,6 +146,7 @@ def _handle_process(job: Job) -> None:
             cfg(), m.get("system_wav"), m.get("mic_wav"),
             audio_label=(m.get("base_path") or "") + ".*.wav",
             meeting_date=(m.get("started_at") or m["id"])[:10],
+            title=m.get("title") if m.get("title_edited") else None,
             on_phase=on_phase)
     except Exception as e:
         DB.update_meeting(job.meeting_id, status="failed", error=str(e))
@@ -269,6 +270,11 @@ class ReprocessBody(BaseModel):
     options: dict | None = None
 
 
+class MeetingPatch(BaseModel):
+    title: str | None = None
+    summary_md: str | None = None
+
+
 @api.get("/v1/status")
 def get_status():
     active = JOBS.active()
@@ -348,6 +354,22 @@ def get_meeting(meeting_id: str):
     if m is None:
         raise HTTPException(status_code=404, detail="unknown meeting")
     return {"meeting": meeting_detail(m)}
+
+
+@api.patch("/v1/meetings/{meeting_id}")
+def patch_meeting(meeting_id: str, body: MeetingPatch):
+    m = DB.get_meeting(meeting_id)
+    if m is None:
+        raise HTTPException(status_code=404, detail="unknown meeting")
+    fields = body.model_dump(exclude_unset=True)
+    if "title" in fields:
+        fields["title"] = (fields["title"] or "").strip() or None
+        fields["title_edited"] = 1 if fields["title"] else 0
+    if not fields:
+        raise HTTPException(status_code=400, detail="nothing to update")
+    DB.update_meeting(meeting_id, **fields)
+    BUS.publish("meeting_updated", meeting_id=meeting_id, status=m["status"])
+    return {"meeting": meeting_public(DB.get_meeting(meeting_id))}
 
 
 @api.put("/v1/meetings/{meeting_id}/notes")

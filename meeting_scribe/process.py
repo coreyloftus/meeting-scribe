@@ -124,7 +124,7 @@ def build_note(cfg: Config, transcript: str, audio_label: str | None = None,
 
 def process(cfg: Config, system_wav: str | None, mic_wav: str | None,
             audio_label: str | None = None, user_notes: str | None = None,
-            meeting_date: str | None = None,
+            meeting_date: str | None = None, title: str | None = None,
             on_phase: ProgressFn | None = None) -> ProcessResult:
     """Full pipeline: transcribe -> summarize -> write enabled outputs."""
     on_phase = on_phase or _noop
@@ -158,6 +158,8 @@ def process(cfg: Config, system_wav: str | None, mic_wav: str | None,
     note = build_note(cfg, transcript, audio_label=audio_label,
                       user_notes=user_notes, meeting_date=meeting_date,
                       warnings=warnings)
+    if title:
+        note.title = title
 
     on_phase("writing_outputs", None)
     results = write_all(cfg, note)

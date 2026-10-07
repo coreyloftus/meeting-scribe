@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS meetings (
   ended_at        TEXT,
   status          TEXT NOT NULL,
   title           TEXT,
+  title_edited    INTEGER NOT NULL DEFAULT 0,  -- 1 = user-set title; reprocess keeps it
   slug            TEXT,
   duration_sec    INTEGER,
   system_wav      TEXT,
@@ -81,6 +82,10 @@ class Database:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(meetings)")}
         if "warnings" not in cols:
             self._conn.execute("ALTER TABLE meetings ADD COLUMN warnings TEXT")
+            self._conn.commit()
+        if "title_edited" not in cols:
+            self._conn.execute(
+                "ALTER TABLE meetings ADD COLUMN title_edited INTEGER NOT NULL DEFAULT 0")
             self._conn.commit()
         self._lock = threading.Lock()
 
