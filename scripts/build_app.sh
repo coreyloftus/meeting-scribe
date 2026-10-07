@@ -10,6 +10,11 @@ OUT="$APP_SRC/dist/MeetingScribe.app"
 # Compile with swiftc directly — no SwiftPM needed (the app has no external
 # dependencies, and bare CommandLineTools' SwiftPM manifest lib can be broken).
 echo "→ swiftc (release)…"
+# CommandLineTools' macOS 27 SDK needs a SwiftUI macro plugin it doesn't ship; use the 26 SDK.
+CLT=/Library/Developer/CommandLineTools
+if [ -z "${SDKROOT:-}" ] && [ "$(xcode-select -p)" = "$CLT" ] && [ -d "$CLT/SDKs/MacOSX26.sdk" ]; then
+    export SDKROOT="$CLT/SDKs/MacOSX26.sdk"
+fi
 BUILD_DIR="$APP_SRC/.build"
 mkdir -p "$BUILD_DIR"
 BIN="$BUILD_DIR/MeetingScribe"

@@ -225,6 +225,10 @@ struct MeetingDetailView: View {
     @State private var transcriptExpanded = false
     @State private var notesDraft: String = ""
     @State private var notesEditing = false
+    @State private var titleDraft: String = ""
+    @State private var titleEditing = false
+    @State private var summaryDraft: String = ""
+    @State private var summaryEditing = false
     @State private var confirmDelete = false
 
     var body: some View {
@@ -236,7 +240,9 @@ struct MeetingDetailView: View {
                     if m.status == "failed", let err = m.error {
                         errorBox(m, err)
                     }
-                    if let summary = m.summaryMd {
+                    if summaryEditing {
+                        summaryEditor(m)
+                    } else if let summary = m.summaryMd {
                         MarkdownBlock(text: summary)
                     } else if m.isProcessing {
                         HStack(spacing: 8) {
@@ -255,6 +261,11 @@ struct MeetingDetailView: View {
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .onChange(of: m.id) {
+                titleEditing = false
+                summaryEditing = false
+                notesEditing = false
+            }
             .confirmationDialog("Delete this meeting?", isPresented: $confirmDelete) {
                 Button("Remove from list only") { state.deleteMeeting(m.id, deleteFiles: false) }
                 Button("Delete audio & files too", role: .destructive) {
@@ -270,7 +281,19 @@ struct MeetingDetailView: View {
     @ViewBuilder
     private func header(_ m: Meeting) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(m.displayTitle).font(.title.bold()).textSelection(.enabled)
+            if titleEditing {
+                HStack {
+                    TextField("Title", text: $titleDraft)
+                        .font(.title.bold())
+                        .textFieldStyle(.plain)
+                        .onSubmit { saveTitle(m) }
+                        .onExitCommand { titleEditing = false }
+                    Button("Save") { saveTitle(m) }
+                    Button("Cancel") { titleEditing = false }
+                }
+            } else {
+                Text(m.displayTitle).font(.title.bold()).textSelection(.enabled)
+            }
             HStack(spacing: 10) {
                 StatusChip(status: m.status)
                 Text(m.startedAt?.replacingOccurrences(of: "T", with: "  ") ?? m.id)
@@ -279,6 +302,16 @@ struct MeetingDetailView: View {
                 }
                 Spacer()
                 Menu {
+                    Button("Rename…") {
+                        titleDraft = m.displayTitle
+                        titleEditing = true
+                    }
+                    Button("Edit Summary") {
+                        summaryDraft = m.summaryMd ?? ""
+                        summaryEditing = true
+                    }
+                    .disabled(m.summaryMd == nil)
+                    Divider()
                     Button("Reprocess (re-transcribe & summarize)") { state.reprocess(m.id) }
                     Button("Reveal in Finder") { state.revealInFinder(m) }
                     Button("Copy Transcript Path") { state.copyTranscriptPath(m) }
@@ -293,6 +326,33 @@ struct MeetingDetailView: View {
             }
             .font(.callout)
             .foregroundStyle(.secondary)
+        }
+    }
+
+    private func saveTitle(_ m: Meeting) {
+        state.renameMeeting(m.id, title: titleDraft)
+        titleEditing = false
+    }
+
+    @ViewBuilder
+    private func summaryEditor(_ m: Meeting) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Edit Summary").font(.headline)
+                Spacer()
+                Button("Save") {
+                    state.saveSummary(m.id, text: summaryDraft)
+                    summaryEditing = false
+                }
+                Button("Cancel") { summaryEditing = false }
+            }
+            TextEditor(text: $summaryDraft)
+                .font(.body.monospaced())
+                .frame(minHeight: 400)
+                .padding(6)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            Text("Push to Notion or Markdown again to send the edited summary.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 

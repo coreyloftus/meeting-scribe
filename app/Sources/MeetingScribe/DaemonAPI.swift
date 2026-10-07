@@ -214,6 +214,13 @@ struct DaemonClient {
         _ = try await request("PUT", "v1/meetings/\(id)/notes", body: ["notes": notes])
     }
 
+    func updateMeeting(_ id: String, title: String? = nil, summaryMd: String? = nil) async throws {
+        var body: [String: Any] = [:]
+        if let title { body["title"] = title }
+        if let summaryMd { body["summary_md"] = summaryMd }
+        _ = try await request("PATCH", "v1/meetings/\(id)", body: body)
+    }
+
     func saveSessionNotes(_ notes: String) async throws {
         _ = try await request("PUT", "v1/session/notes", body: ["notes": notes])
     }
