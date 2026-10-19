@@ -459,6 +459,8 @@ def delete_meeting(meeting_id: str, delete_files: bool = False):
         raise HTTPException(status_code=404, detail="unknown meeting")
     if m["status"] == "recording":
         raise HTTPException(status_code=409, detail="stop the recording first")
+    if m["status"] in INTERRUPTED_STATUSES:
+        raise HTTPException(status_code=409, detail="wait for processing to finish")
     removed: list[str] = []
     if delete_files and m.get("base_path"):
         base = m["base_path"]

@@ -476,8 +476,9 @@ struct OutputsBar: View {
             .help(integ.configured ? "Send this note to \(integ.label)"
                                    : "\(integ.label) is not configured (see Settings)")
 
-            if let url = latest?.url, latest?.status == "ok", url.hasPrefix("http") {
-                Link(destination: URL(string: url)!) {
+            if let url = latest?.url, latest?.status == "ok", url.hasPrefix("http"),
+               let destination = URL(string: url) {
+                Link(destination: destination) {
                     Image(systemName: "arrow.up.right.square")
                 }
                 .help("Open in \(integ.label)")
