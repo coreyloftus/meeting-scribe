@@ -39,6 +39,8 @@ DB: Database | None = None
 TOKEN: str = ""
 # Start and stop each check, then change, the session file; serialize them.
 RECORDING_LOCK = threading.Lock()
+# Browser consent runs on a background thread; the app learns the result via integrations_changed.
+GOOGLE_CONNECT = {"running": False, "error": None}
 
 INTERRUPTED_STATUSES = ("queued", "transcribing", "summarizing", "writing_outputs")
 
@@ -513,7 +515,9 @@ def get_integrations():
     google_connected = c.google_token_path.is_file()
     return {"outputs": items,
             "google": {"connected": google_connected,
-                       "client_configured": bool(c.google_client_id and c.google_client_secret)},
+                       "client_configured": bool(c.google_client_id and c.google_client_secret),
+                       "connecting": GOOGLE_CONNECT["running"],
+                       "error": GOOGLE_CONNECT["error"]},
             "notion": {"connected": bool(c.notion_token),
                        "workspace_name": c.get("outputs", "notion", "workspace_name", default="") or "",
                        "database_id": c.get("outputs", "notion", "database_id", default="") or "",
@@ -528,11 +532,21 @@ def google_connect():
                             detail="set google.client_id and google.client_secret first "
                                    "(GCP Desktop-app OAuth client)")
     from ..integrations import google_auth
-    try:
-        info = google_auth.connect_interactive(c)
-    except google_auth.GoogleAuthError as e:
-        raise HTTPException(status_code=502, detail=str(e))
-    return {"ok": True, **info}
+    if GOOGLE_CONNECT["running"]:
+        return {"ok": True, "pending": True}
+    GOOGLE_CONNECT.update(running=True, error=None)
+
+    def run() -> None:
+        try:
+            google_auth.connect_interactive(c)
+        except Exception as e:
+            GOOGLE_CONNECT["error"] = str(e)
+        finally:
+            GOOGLE_CONNECT["running"] = False
+            BUS.publish("integrations_changed")
+
+    threading.Thread(target=run, name="google-connect", daemon=True).start()
+    return {"ok": True, "pending": True}
 
 
 class NotionDatabaseBody(BaseModel):

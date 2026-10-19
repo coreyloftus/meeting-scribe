@@ -69,6 +69,8 @@ struct IntegrationsResponse: Codable, Equatable {
     struct GoogleInfo: Codable, Equatable {
         var connected: Bool
         var clientConfigured: Bool
+        var connecting: Bool?
+        var error: String?
     }
     struct NotionInfo: Codable, Equatable {
         var connected: Bool

@@ -85,6 +85,13 @@ struct IntegrationsSettings: View {
             await state.refreshIntegrations()
             await loadSavedFields()
         }
+        .onChange(of: state.integrationsChanges) {
+            // The daemon publishes integrations_changed when browser consent finishes or fails.
+            guard connecting, let google = state.integrations?.google, google.connecting != true else { return }
+            connecting = false
+            message = google.connected ? "Google connected."
+                                       : "Google connect failed: \(google.error ?? "unknown error")"
+        }
         .task(id: "\(state.integrations?.notion.connected == true)-\(state.integrationsChanges)") {
             if state.integrations?.notion.connected == true {
                 notionConnecting = false
@@ -260,12 +267,11 @@ struct IntegrationsSettings: View {
                                     "client_secret": googleClientSecret]])
                 }
                 try await state.client?.connectGoogle()
-                message = "Google connected."
+                message = "Finish signing in to Google in your browser."
             } catch {
+                connecting = false
                 message = "Google connect failed: \(error.localizedDescription)"
             }
-            connecting = false
-            await state.refreshIntegrations()
         }
     }
 }
