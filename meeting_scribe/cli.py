@@ -389,7 +389,8 @@ def cmd_config(args) -> int:
     cfg = _load(args)
     print(f"config source: {cfg.source or '(defaults only)'}")
     import json
-    print(json.dumps(cfg.data, indent=2))
+    from .config import redacted
+    print(json.dumps(redacted(cfg.data), indent=2))
     return 0
 
 

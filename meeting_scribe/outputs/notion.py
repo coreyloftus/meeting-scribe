@@ -7,6 +7,7 @@ in config.json, so it's fully portable. Markdown is converted to Notion blocks
 from __future__ import annotations
 
 import re
+import time
 
 import requests
 
@@ -73,6 +74,32 @@ def markdown_to_blocks(md: str) -> list[dict]:
     return blocks
 
 
+def _request(method: str, url: str, token: str, payload: dict) -> requests.Response:
+    """Notion allows ~3 requests/s: retry 429 and 5xx, honoring Retry-After."""
+    for attempt in range(4):
+        resp = requests.request(method, url, headers=_headers(token), json=payload, timeout=30)
+        if resp.status_code != 429 and resp.status_code < 500 or attempt == 3:
+            return resp
+        try:
+            wait = float(resp.headers.get("Retry-After", ""))
+        except ValueError:
+            wait = 2 ** attempt
+        time.sleep(min(wait, 30))
+    return resp
+
+
+def _page_id(url: str) -> str | None:
+    m = re.search(r"([0-9a-f]{32})$", url.replace("-", ""))
+    return m.group(1) if m else None
+
+
+def _archive(token: str, page_id: str) -> None:
+    try:
+        _request("PATCH", f"{NOTION_API}/pages/{page_id}", token, {"archived": True})
+    except requests.RequestException:
+        pass  # best-effort: a leftover page is better than a failed push
+
+
 def is_configured(cfg: Config) -> bool:
     return bool(cfg.notion_token) and bool(cfg.get("outputs", "notion", "database_id", default=""))
 
@@ -106,13 +133,13 @@ def write(cfg: Config, note, options: dict | None = None) -> OutputResult:
         "children": blocks[:MAX_CHILDREN],
     }
 
-    resp = requests.post(f"{NOTION_API}/pages", headers=_headers(token), json=payload, timeout=30)
+    resp = _request("POST", f"{NOTION_API}/pages", token, payload)
     if resp.status_code == 401:
         from ..integrations import notion_auth
         if not notion_auth.refresh(cfg):
             raise NotionError("Notion access expired — reconnect in Settings.")
         token = config_mod.load(cfg.source).notion_token
-        resp = requests.post(f"{NOTION_API}/pages", headers=_headers(token), json=payload, timeout=30)
+        resp = _request("POST", f"{NOTION_API}/pages", token, payload)
     if resp.status_code >= 300:
         raise NotionError(f"create page failed ({resp.status_code}): {resp.text[:300]}")
     page = resp.json()
@@ -122,10 +149,15 @@ def write(cfg: Config, note, options: dict | None = None) -> OutputResult:
     remaining = blocks[MAX_CHILDREN:]
     for i in range(0, len(remaining), MAX_CHILDREN):
         batch = remaining[i:i + MAX_CHILDREN]
-        r = requests.patch(f"{NOTION_API}/blocks/{page_id}/children",
-                           headers=_headers(token), json={"children": batch}, timeout=30)
+        r = _request("PATCH", f"{NOTION_API}/blocks/{page_id}/children", token, {"children": batch})
         if r.status_code >= 300:
+            _archive(token, page_id)  # don't leave a half-written page behind
             raise NotionError(f"append blocks failed ({r.status_code}): {r.text[:200]}")
+
+    # A re-push replaces the meeting's last page rather than adding another copy.
+    old_id = _page_id(note.previous_urls.get(KEY, ""))
+    if old_id and old_id != page_id.replace("-", ""):
+        _archive(token, old_id)
 
     url = page.get("url", page_id)
     return OutputResult(target=KEY, ok=True, url=url)

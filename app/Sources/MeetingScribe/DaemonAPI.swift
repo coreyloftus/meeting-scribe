@@ -45,6 +45,7 @@ struct Meeting: Codable, Equatable, Identifiable {
     var slug: String?
     var durationSec: Int?
     var summaryMd: String?
+    var summaryEdited: Int?    // 1 = the user edited the summary
     var error: String?
     var outputs: [OutputRow]?
     var transcript: String?    // detail endpoint only
@@ -68,6 +69,8 @@ struct IntegrationsResponse: Codable, Equatable {
     struct GoogleInfo: Codable, Equatable {
         var connected: Bool
         var clientConfigured: Bool
+        var connecting: Bool?
+        var error: String?
     }
     struct NotionInfo: Codable, Equatable {
         var connected: Bool
@@ -144,9 +147,26 @@ struct DaemonClient {
         return d
     }()
 
-    private func request(_ method: String, _ path: String,
+    /// `.urlQueryAllowed` keeps `&`, `+`, `=` and `#`, which break a query value.
+    private static let queryValueAllowed: CharacterSet = {
+        var set = CharacterSet.urlQueryAllowed
+        set.remove(charactersIn: "&+=#?")
+        return set
+    }()
+
+    private func url(_ path: String, query: [String: String] = [:]) -> URL {
+        let url = baseURL.appendingPathComponent(path)
+        guard !query.isEmpty, var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else { return url }
+        comps.percentEncodedQuery = query.sorted { $0.key < $1.key }.map { key, value in
+            "\(key)=\(value.addingPercentEncoding(withAllowedCharacters: Self.queryValueAllowed) ?? "")"
+        }.joined(separator: "&")
+        return comps.url ?? url
+    }
+
+    private func request(_ method: String, _ path: String, query: [String: String] = [:],
                          body: [String: Any]? = nil) async throws -> Data {
-        var req = URLRequest(url: baseURL.appendingPathComponent(path))
+        var req = URLRequest(url: url(path, query: query))
         req.httpMethod = method
         req.timeoutInterval = 30
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -163,8 +183,9 @@ struct DaemonClient {
         return data
     }
 
-    private func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
-        try Self.decoder.decode(T.self, from: try await request("GET", path))
+    private func get<T: Decodable>(_ path: String, query: [String: String] = [:],
+                                   as type: T.Type) async throws -> T {
+        try Self.decoder.decode(T.self, from: try await request("GET", path, query: query))
     }
 
     // MARK: endpoints
@@ -175,19 +196,9 @@ struct DaemonClient {
 
     struct MeetingsEnvelope: Codable { var meetings: [Meeting] }
     func meetings(limit: Int = 200, query: String? = nil) async throws -> [Meeting] {
-        var path = "v1/meetings?limit=\(limit)"
-        if let q = query, !q.isEmpty,
-           let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            path += "&q=\(enc)"
-        }
-        // appendingPathComponent escapes "?", so build the URL directly here.
-        var req = URLRequest(url: URL(string: baseURL.absoluteString + "/" + path)!)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        guard let code = (resp as? HTTPURLResponse)?.statusCode, code < 300 else {
-            throw DaemonError.http((resp as? HTTPURLResponse)?.statusCode ?? 0, "")
-        }
-        return try Self.decoder.decode(MeetingsEnvelope.self, from: data).meetings
+        var params = ["limit": "\(limit)"]
+        if let q = query, !q.isEmpty { params["q"] = q }
+        return try await get("v1/meetings", query: params, as: MeetingsEnvelope.self).meetings
     }
 
     struct MeetingEnvelope: Codable { var meeting: Meeting }
@@ -202,12 +213,13 @@ struct DaemonClient {
         _ = try await request("POST", "v1/meetings/\(id)/push", body: ["target": target])
     }
 
-    func reprocess(_ id: String) async throws {
-        _ = try await request("POST", "v1/meetings/\(id)/reprocess", body: [:])
+    func reprocess(_ id: String, reuseTranscript: Bool = false) async throws {
+        _ = try await request("POST", "v1/meetings/\(id)/reprocess",
+                              body: ["options": ["reuse_transcript": reuseTranscript]])
     }
 
     func delete(_ id: String, deleteFiles: Bool) async throws {
-        _ = try await request("DELETE", "v1/meetings/\(id)?delete_files=\(deleteFiles)")
+        _ = try await request("DELETE", "v1/meetings/\(id)", query: ["delete_files": "\(deleteFiles)"])
     }
 
     func saveNotes(_ id: String, notes: String) async throws {
@@ -273,23 +285,28 @@ struct DaemonClient {
     func events() -> AsyncThrowingStream<SSEEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                var req = URLRequest(url: baseURL.appendingPathComponent("v1/events"))
-                req.timeoutInterval = 3600 * 24
-                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                let (bytes, resp) = try await URLSession.shared.bytes(for: req)
-                guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
-                    throw DaemonError.http((resp as? HTTPURLResponse)?.statusCode ?? 0, "SSE")
-                }
-                for try await line in bytes.lines {
-                    guard line.hasPrefix("data: ") else { continue }
-                    let json = String(line.dropFirst(6))
-                    if let data = json.data(using: .utf8),
-                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let type = obj["type"] as? String {
-                        continuation.yield(SSEEvent(type: type, data: obj))
+                do {
+                    var req = URLRequest(url: baseURL.appendingPathComponent("v1/events"))
+                    req.timeoutInterval = 3600 * 24
+                    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                    let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+                    guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
+                        throw DaemonError.http((resp as? HTTPURLResponse)?.statusCode ?? 0, "SSE")
                     }
+                    for try await line in bytes.lines {
+                        guard line.hasPrefix("data: ") else { continue }
+                        let json = String(line.dropFirst(6))
+                        if let data = json.data(using: .utf8),
+                           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                           let type = obj["type"] as? String {
+                            continuation.yield(SSEEvent(type: type, data: obj))
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    // A throwing Task keeps its error, so end the stream explicitly or the consumer hangs.
+                    continuation.finish(throwing: error)
                 }
-                continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }

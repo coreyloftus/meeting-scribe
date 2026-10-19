@@ -81,7 +81,17 @@ struct IntegrationsSettings: View {
             }
         }
         .formStyle(.grouped)
-        .task { await state.refreshIntegrations() }
+        .task {
+            await state.refreshIntegrations()
+            await loadSavedFields()
+        }
+        .onChange(of: state.integrationsChanges) {
+            // The daemon publishes integrations_changed when browser consent finishes or fails.
+            guard connecting, let google = state.integrations?.google, google.connecting != true else { return }
+            connecting = false
+            message = google.connected ? "Google connected."
+                                       : "Google connect failed: \(google.error ?? "unknown error")"
+        }
         .task(id: "\(state.integrations?.notion.connected == true)-\(state.integrationsChanges)") {
             if state.integrations?.notion.connected == true {
                 notionConnecting = false
@@ -143,8 +153,10 @@ struct IntegrationsSettings: View {
         SecureField("Integration token", text: $notionToken)
         TextField("Database ID", text: $notionDB)
         Button("Save Notion Settings") {
-            save(["outputs": ["notion": ["token": notionToken,
-                                         "database_id": notionDB]]])
+            // A blank token field means "keep the saved one", not "clear it".
+            var notion: [String: Any] = ["database_id": notionDB]
+            if !notionToken.isEmpty { notion["token"] = notionToken }
+            save(["outputs": ["notion": notion]])
         }
     }
 
@@ -209,6 +221,20 @@ struct IntegrationsSettings: View {
         }
     }
 
+    /// Prefill the plain-text fields so a save doesn't write blanks over saved values.
+    private func loadSavedFields() async {
+        guard let config = try? await state.client?.getConfigRaw() else { return }
+        func value(_ path: String...) -> String {
+            var node: Any? = config
+            for key in path { node = (node as? [String: Any])?[key] }
+            return node as? String ?? ""
+        }
+        notionDB = value("outputs", "notion", "database_id")
+        gdriveFolder = value("outputs", "gdrive", "folder_id")
+        gdocsFolder = value("outputs", "gdocs", "folder_id")
+        googleClientID = value("google", "client_id")
+    }
+
     private func binding(for integ: IntegrationInfo) -> Binding<Bool> {
         Binding(
             get: {
@@ -241,12 +267,11 @@ struct IntegrationsSettings: View {
                                     "client_secret": googleClientSecret]])
                 }
                 try await state.client?.connectGoogle()
-                message = "Google connected."
+                message = "Finish signing in to Google in your browser."
             } catch {
+                connecting = false
                 message = "Google connect failed: \(error.localizedDescription)"
             }
-            connecting = false
-            await state.refreshIntegrations()
         }
     }
 }

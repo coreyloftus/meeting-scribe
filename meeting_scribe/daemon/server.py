@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import html
-import json
 import os
 import shutil
 import socket
+import threading
 import time
 import webbrowser
 from contextlib import asynccontextmanager
@@ -29,7 +29,7 @@ from ..outputs import Note, REGISTRY, write_one
 from ..recorder import HELPER_BIN
 from . import DAEMON_VERSION
 from . import state
-from .db import Database, stamp_to_iso
+from .db import Database
 from .events import EventBus, sse_format
 from .jobs import Job, JobQueue
 
@@ -37,17 +37,15 @@ BUS = EventBus()
 JOBS = JobQueue()
 DB: Database | None = None
 TOKEN: str = ""
+# Start and stop each check, then change, the session file; serialize them.
+RECORDING_LOCK = threading.Lock()
+# Browser consent runs on a background thread; the app learns the result via integrations_changed.
+GOOGLE_CONNECT = {"running": False, "error": None}
 
 INTERRUPTED_STATUSES = ("queued", "transcribing", "summarizing", "writing_outputs")
 
-# Secret config keys, as (path...) tuples: redacted on GET, preserved on PUT.
-SECRET_PATHS = (
-    ("anthropic", "api_key"),
-    ("outputs", "notion", "token"),
-    ("outputs", "notion", "refresh_token"),
-    ("google", "client_secret"),
-)
-REDACTED = "•••"
+SECRET_PATHS = config_mod.SECRET_PATHS
+REDACTED = config_mod.REDACTED
 
 
 def cfg():
@@ -123,7 +121,17 @@ def _note_from_meeting(m: dict) -> Note:
         audio_path=(m.get("base_path") or None) and m["base_path"] + ".*.wav",
         user_notes=_read_optional(m.get("notes_path")),
         warnings=[w for w in (m.get("warnings") or "").split("\n") if w],
+        previous_urls=_previous_urls(m["id"]),
     )
+
+
+def _previous_urls(meeting_id: str) -> dict[str, str]:
+    """Latest successful url per target (outputs_for is newest first)."""
+    urls: dict[str, str] = {}
+    for o in DB.outputs_for(meeting_id):
+        if o["status"] == "ok" and o.get("url"):
+            urls.setdefault(o["target"], o["url"])
+    return urls
 
 
 # --- job handlers ----------------------------------------------------------------
@@ -147,7 +155,11 @@ def _handle_process(job: Job) -> None:
             audio_label=(m.get("base_path") or "") + ".*.wav",
             meeting_date=(m.get("started_at") or m["id"])[:10],
             title=m.get("title") if m.get("title_edited") else None,
-            on_phase=on_phase)
+            on_phase=on_phase,
+            # Reprocess re-transcribes; a retry after a failed summary may reuse the transcript.
+            force_transcribe=(job.type == "reprocess"
+                              and not job.options.get("reuse_transcript")),
+            previous_urls=_previous_urls(job.meeting_id))
     except Exception as e:
         DB.update_meeting(job.meeting_id, status="failed", error=str(e))
         BUS.publish("meeting_updated", meeting_id=job.meeting_id, status="failed",
@@ -156,7 +168,7 @@ def _handle_process(job: Job) -> None:
 
     note = result.note
     DB.update_meeting(
-        job.meeting_id, status="done", error=None,
+        job.meeting_id, status="done", error=None, summary_edited=0,
         title=note.title, slug=note.slug, summary_md=note.summary_md,
         warnings="\n".join(result.warnings) if result.warnings else None,
         transcript_path=str(result.transcript_path) if result.transcript_path else None)
@@ -307,6 +319,11 @@ async def get_events():
 
 @api.post("/v1/start")
 def post_start():
+    with RECORDING_LOCK:
+        return _start()
+
+
+def _start():
     try:
         s = recorder.start(cfg())
     except recorder.RecorderError as e:
@@ -321,6 +338,11 @@ def post_start():
 
 @api.post("/v1/stop")
 def post_stop():
+    with RECORDING_LOCK:
+        return _stop()
+
+
+def _stop():
     t0 = time.monotonic()
     try:
         s = recorder.stop(cfg())
@@ -365,6 +387,8 @@ def patch_meeting(meeting_id: str, body: MeetingPatch):
     if "title" in fields:
         fields["title"] = (fields["title"] or "").strip() or None
         fields["title_edited"] = 1 if fields["title"] else 0
+    if "summary_md" in fields:
+        fields["summary_edited"] = 1
     if not fields:
         raise HTTPException(status_code=400, detail="nothing to update")
     DB.update_meeting(meeting_id, **fields)
@@ -403,6 +427,8 @@ def post_reprocess(meeting_id: str, body: ReprocessBody | None = None):
         raise HTTPException(status_code=404, detail="unknown meeting")
     if m["status"] == "recording":
         raise HTTPException(status_code=409, detail="meeting is still recording")
+    if m["status"] in INTERRUPTED_STATUSES:
+        raise HTTPException(status_code=409, detail="meeting is already being processed")
     if not (m.get("system_wav") or m.get("mic_wav")):
         raise HTTPException(status_code=409, detail="no audio on disk for this meeting")
     DB.update_meeting(meeting_id, status="queued", error=None)
@@ -433,6 +459,8 @@ def delete_meeting(meeting_id: str, delete_files: bool = False):
         raise HTTPException(status_code=404, detail="unknown meeting")
     if m["status"] == "recording":
         raise HTTPException(status_code=409, detail="stop the recording first")
+    if m["status"] in INTERRUPTED_STATUSES:
+        raise HTTPException(status_code=409, detail="wait for processing to finish")
     removed: list[str] = []
     if delete_files and m.get("base_path"):
         base = m["base_path"]
@@ -457,12 +485,6 @@ def _get_path(d: dict, path: tuple) -> object:
     return d
 
 
-def _set_path(d: dict, path: tuple, value) -> None:
-    for k in path[:-1]:
-        d = d.setdefault(k, {})
-    d[path[-1]] = value
-
-
 def _del_path(d: dict, path: tuple) -> None:
     for k in path[:-1]:
         if not isinstance(d, dict) or k not in d:
@@ -475,18 +497,14 @@ def _del_path(d: dict, path: tuple) -> None:
 @api.get("/v1/config")
 def get_config():
     c = cfg()
-    data = json.loads(json.dumps(c.data))  # deep copy
-    for path in SECRET_PATHS:
-        if _get_path(data, path):
-            _set_path(data, path, REDACTED)
-    return {"config": data, "source": str(c.source) if c.source else None}
+    return {"config": config_mod.redacted(c.data), "source": str(c.source) if c.source else None}
 
 
 @api.put("/v1/config")
 def put_config(body: dict):
-    # Don't let the redaction placeholder overwrite a real secret.
+    # Don't let the redaction placeholder or a blank field overwrite a real secret.
     for path in SECRET_PATHS:
-        if _get_path(body, path) == REDACTED:
+        if _get_path(body, path) in (REDACTED, ""):
             _del_path(body, path)
     try:
         config_mod.write_patch(body)
@@ -510,7 +528,9 @@ def get_integrations():
     google_connected = c.google_token_path.is_file()
     return {"outputs": items,
             "google": {"connected": google_connected,
-                       "client_configured": bool(c.google_client_id and c.google_client_secret)},
+                       "client_configured": bool(c.google_client_id and c.google_client_secret),
+                       "connecting": GOOGLE_CONNECT["running"],
+                       "error": GOOGLE_CONNECT["error"]},
             "notion": {"connected": bool(c.notion_token),
                        "workspace_name": c.get("outputs", "notion", "workspace_name", default="") or "",
                        "database_id": c.get("outputs", "notion", "database_id", default="") or "",
@@ -525,11 +545,21 @@ def google_connect():
                             detail="set google.client_id and google.client_secret first "
                                    "(GCP Desktop-app OAuth client)")
     from ..integrations import google_auth
-    try:
-        info = google_auth.connect_interactive(c)
-    except google_auth.GoogleAuthError as e:
-        raise HTTPException(status_code=502, detail=str(e))
-    return {"ok": True, **info}
+    if GOOGLE_CONNECT["running"]:
+        return {"ok": True, "pending": True}
+    GOOGLE_CONNECT.update(running=True, error=None)
+
+    def run() -> None:
+        try:
+            google_auth.connect_interactive(c)
+        except Exception as e:
+            GOOGLE_CONNECT["error"] = str(e)
+        finally:
+            GOOGLE_CONNECT["running"] = False
+            BUS.publish("integrations_changed")
+
+    threading.Thread(target=run, name="google-connect", daemon=True).start()
+    return {"ok": True, "pending": True}
 
 
 class NotionDatabaseBody(BaseModel):
@@ -613,13 +643,22 @@ def get_doctor():
     def check(key: str, ok: bool, detail: str):
         checks.append({"key": key, "ok": ok, "detail": detail})
 
-    for tool in ("ffmpeg", "ffprobe", c.whisper_cli, "SwitchAudioSource"):
+    tools = ["ffmpeg", "ffprobe", "SwitchAudioSource"]
+    if c.engine != "parakeet":
+        tools.insert(2, c.whisper_cli)
+    for tool in tools:
         path = shutil.which(tool)
         check(f"tool:{tool}", bool(path), path or "not found on PATH")
     check("helper:syscap", HELPER_BIN.exists(),
           str(HELPER_BIN) if HELPER_BIN.exists() else "not built — run scripts/build_helper.sh")
-    model = c.whisper_model
-    check("whisper_model", bool(model and Path(model).is_file()), str(model or "(unset)"))
+    if c.engine == "parakeet":
+        import importlib.util
+        pk = importlib.util.find_spec("parakeet_mlx") is not None
+        check("engine:parakeet", pk,
+              c.parakeet_model if pk else "parakeet-mlx not installed")
+    else:
+        model = c.whisper_model
+        check("engine:whisper", bool(model and Path(model).is_file()), str(model or "(unset)"))
     check("config", bool(c.source), str(c.source or "defaults only"))
     if c.llm_backend == "claude_cli":
         cli = shutil.which(c.claude_cli)
@@ -673,12 +712,15 @@ def serve(host: str = state.DEFAULT_HOST, port: int | None = None) -> None:
         if os.path.isdir(_dir) and _dir not in _path.split(os.pathsep):
             _path = _dir + os.pathsep + _path
     os.environ["PATH"] = _path
+    state.trim_log()
     TOKEN = state.ensure_token()
     DB = Database(state.DB_FILE)
     actual_port = _pick_port(host, port or state.DEFAULT_PORT)
     state.write_info(host, actual_port, DAEMON_VERSION)
     print(f"[scribed] v{DAEMON_VERSION} listening on http://{host}:{actual_port}")
-    uvicorn.run(app, host=host, port=actual_port, log_level="info")
+    # No access log (2 s status polls, OAuth codes); the open SSE stream would block a graceful stop.
+    uvicorn.run(app, host=host, port=actual_port, log_level="info", access_log=False,
+                timeout_graceful_shutdown=3)
 
 
 def main(argv: list[str] | None = None) -> int:

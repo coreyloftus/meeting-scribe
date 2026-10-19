@@ -88,8 +88,12 @@ def connect_interactive(cfg: Config) -> dict:
     """Run the browser consent flow; cache the token. Returns {email}."""
     _, _, AuthorizedSession, InstalledAppFlow = _imports()
     flow = InstalledAppFlow.from_client_config(_client_config(cfg), SCOPES)
-    creds = flow.run_local_server(port=0, open_browser=True,
-                                  authorization_prompt_message="")
+    try:
+        creds = flow.run_local_server(port=0, open_browser=True,
+                                      authorization_prompt_message="", timeout_seconds=300)
+    except Exception as e:
+        # Includes WSGITimeoutError when the browser tab is abandoned.
+        raise GoogleAuthError(f"Google consent did not finish: {e}") from e
     _save_token(cfg, creds)
     email = None
     try:

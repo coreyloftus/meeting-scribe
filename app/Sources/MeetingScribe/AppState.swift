@@ -54,7 +54,14 @@ final class AppState: ObservableObject {
                 try? await Task.sleep(for: .seconds(2))
                 guard let self else { return }
                 if !self.daemonUp { self.connect() }
-                else if self.eventTask == nil { await self.refreshStatus() }
+                else if self.eventTask == nil {
+                    // The stream dropped (sleep, network change): resync and reopen it.
+                    await self.refreshStatus()
+                    guard self.daemonUp else { continue }
+                    await self.refreshMeetings()
+                    await self.refreshDetail()
+                    self.startEventStream()
+                }
             }
         }
     }
@@ -110,8 +117,8 @@ final class AppState: ObservableObject {
                     self.handle(event)
                 }
             } catch {}
-            // Stream ended/failed: drop to polling; bootstrap loop reconnects.
-            self?.eventTask = nil
+            // Stream ended/failed: the bootstrap loop reconnects. A cancelled task was replaced, so leave the new one.
+            if !Task.isCancelled { self?.eventTask = nil }
         }
     }
 
@@ -235,15 +242,27 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Live notes not yet sent to the daemon; flushed before Stop so the last line isn't lost.
+    var pendingSessionNotes: String?
+
+    func flushSessionNotes() async {
+        guard let text = pendingSessionNotes else { return }
+        pendingSessionNotes = nil
+        try? await client?.saveSessionNotes(text)
+    }
+
     func stopRecording() {
         stopping = true
         run("stop") { [self] in
             defer { stopping = false }
+            await flushSessionNotes()
             try await client?.stop()
         }
     }
     func push(_ id: String, target: String) { run("push \(target)") { [self] in try await client?.push(id, target: target) } }
-    func reprocess(_ id: String) { run("reprocess") { [self] in try await client?.reprocess(id) } }
+    func reprocess(_ id: String, reuseTranscript: Bool = false) {
+        run("reprocess") { [self] in try await client?.reprocess(id, reuseTranscript: reuseTranscript) }
+    }
     func deleteMeeting(_ id: String, deleteFiles: Bool) {
         run("delete") { [self] in
             try await client?.delete(id, deleteFiles: deleteFiles)
@@ -272,7 +291,10 @@ final class AppState: ObservableObject {
     func revealInFinder(_ meeting: Meeting) {
         guard let base = meeting.basePath else { return }
         let dir = (base as NSString).deletingLastPathComponent
-        NSWorkspace.shared.selectFile(base + ".system.wav", inFileViewerRootedAtPath: dir)
+        // Mic-only meetings have no system channel; select whichever file exists.
+        let file = [".system.wav", ".mic.wav", ".transcript.txt"].map { base + $0 }
+            .first { FileManager.default.fileExists(atPath: $0) }
+        NSWorkspace.shared.selectFile(file, inFileViewerRootedAtPath: dir)
     }
 
     func copyTranscriptPath(_ meeting: Meeting) {

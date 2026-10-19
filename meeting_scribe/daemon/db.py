@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS meetings (
   status          TEXT NOT NULL,
   title           TEXT,
   title_edited    INTEGER NOT NULL DEFAULT 0,  -- 1 = user-set title; reprocess keeps it
+  summary_edited  INTEGER NOT NULL DEFAULT 0,  -- 1 = user-edited summary; app confirms before reprocess
   slug            TEXT,
   duration_sec    INTEGER,
   system_wav      TEXT,
@@ -86,6 +87,10 @@ class Database:
         if "title_edited" not in cols:
             self._conn.execute(
                 "ALTER TABLE meetings ADD COLUMN title_edited INTEGER NOT NULL DEFAULT 0")
+            self._conn.commit()
+        if "summary_edited" not in cols:
+            self._conn.execute(
+                "ALTER TABLE meetings ADD COLUMN summary_edited INTEGER NOT NULL DEFAULT 0")
             self._conn.commit()
         self._lock = threading.Lock()
 
@@ -164,7 +169,7 @@ class Database:
     def outputs_for(self, meeting_id: str) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM outputs WHERE meeting_id=? ORDER BY created_at DESC",
+                "SELECT * FROM outputs WHERE meeting_id=? ORDER BY created_at DESC, id DESC",
                 (meeting_id,)).fetchall()
         return [dict(r) for r in rows]
 

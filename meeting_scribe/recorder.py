@@ -125,26 +125,26 @@ def start(cfg: Config) -> Session:
                 f"Build it with:  bash scripts/build_helper.sh"
             )
         system_wav = str(base) + ".system.wav"
-        log = open(str(base) + ".syscap.log", "wb")
-        p = subprocess.Popen([str(HELPER_BIN), system_wav],
-                             stdout=log, stderr=log, stdin=subprocess.DEVNULL)
+        with open(str(base) + ".syscap.log", "wb") as log:
+            p = subprocess.Popen([str(HELPER_BIN), system_wav],
+                                 stdout=log, stderr=log, stdin=subprocess.DEVNULL)
         system_pid = p.pid
 
     # --- mic via ffmpeg avfoundation ---------------------------------------
     if cfg.capture_mic:
         mic = default_mic_device(cfg)
         mic_wav = str(base) + ".mic.wav"
-        log = open(str(base) + ".ffmpeg.log", "wb")
         # No -ar here: capture at the device's native rate, resample later.
         # -flush_packets 1: write every packet straight to disk — ffmpeg 8's
         # stop path only flushes whole buffered chunks, which otherwise drops
         # the last few seconds of the meeting.
         # avfoundation drops ~10-15% of packets; pad gaps by pts to keep wall-clock time.
-        p = subprocess.Popen(
-            ["ffmpeg", "-nostdin", "-f", "avfoundation", "-i", f":{mic}",
-             "-ac", "1", "-af", "aresample=async=1:first_pts=0",
-             "-flush_packets", "1", "-y", mic_wav],
-            stdout=log, stderr=log, stdin=subprocess.DEVNULL)
+        with open(str(base) + ".ffmpeg.log", "wb") as log:
+            p = subprocess.Popen(
+                ["ffmpeg", "-nostdin", "-f", "avfoundation", "-i", f":{mic}",
+                 "-ac", "1", "-af", "aresample=async=1:first_pts=0",
+                 "-flush_packets", "1", "-y", mic_wav],
+                stdout=log, stderr=log, stdin=subprocess.DEVNULL)
         mic_pid = p.pid
 
     if not system_pid and not mic_pid:
@@ -161,12 +161,14 @@ def start(cfg: Config) -> Session:
     # (bad device name, permission denied, etc.).
     time.sleep(1.0)
     if system_pid and not _alive(system_pid):
+        _abort(session)
         raise RecorderError(
             "System-audio helper exited immediately. Most likely the terminal "
             "lacks Screen Recording permission.\n"
             "Grant it in System Settings > Privacy & Security > Screen Recording, "
             f"then retry. Log: {base}.syscap.log")
     if mic_pid and not _alive(mic_pid):
+        _abort(session)
         raise RecorderError(
             f"Mic capture (ffmpeg) exited immediately. Check the input device. "
             f"Log: {base}.ffmpeg.log")
@@ -194,6 +196,13 @@ def _stop_pid(pid: int | None, timeout: float = 10.0) -> None:
             if not _alive(pid):
                 return
             time.sleep(0.1)
+
+
+def _abort(s: Session) -> None:
+    """A capture died at start: stop the other one so a retry isn't 'Already recording'."""
+    _stop_pid(s.mic_pid)
+    _stop_pid(s.system_pid)
+    _clear_session()
 
 
 def stop(cfg: Config) -> Session:

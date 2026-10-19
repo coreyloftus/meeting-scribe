@@ -210,10 +210,11 @@ struct LiveRecordingView: View {
 
     private func debounceSave(_ text: String) {
         saveTask?.cancel()
+        state.pendingSessionNotes = text
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(800))
             guard !Task.isCancelled else { return }
-            try? await state.client?.saveSessionNotes(text)
+            await state.flushSessionNotes()
         }
     }
 }
@@ -230,6 +231,8 @@ struct MeetingDetailView: View {
     @State private var summaryDraft: String = ""
     @State private var summaryEditing = false
     @State private var confirmDelete = false
+    @State private var confirmReprocess = false
+    @State private var reprocessReusesTranscript = false
 
     var body: some View {
         if let m = state.detail {
@@ -275,6 +278,14 @@ struct MeetingDetailView: View {
             } message: {
                 Text("Remote pages (Notion/Google) are never touched.")
             }
+            .confirmationDialog("Replace your edited summary?", isPresented: $confirmReprocess) {
+                Button("Replace Summary", role: .destructive) {
+                    state.reprocess(m.id, reuseTranscript: reprocessReusesTranscript)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This writes a new summary over the one you edited.")
+            }
         }
     }
 
@@ -312,7 +323,10 @@ struct MeetingDetailView: View {
                     }
                     .disabled(m.summaryMd == nil)
                     Divider()
-                    Button("Reprocess (re-transcribe & summarize)") { state.reprocess(m.id) }
+                    Button("Re-summarize") { reprocess(m, reuseTranscript: true) }
+                        .disabled(m.isProcessing)
+                    Button("Re-transcribe & Summarize") { reprocess(m, reuseTranscript: false) }
+                        .disabled(m.isProcessing)
                     Button("Reveal in Finder") { state.revealInFinder(m) }
                     Button("Copy Transcript Path") { state.copyTranscriptPath(m) }
                         .disabled(m.basePath == nil)
@@ -326,6 +340,15 @@ struct MeetingDetailView: View {
             }
             .font(.callout)
             .foregroundStyle(.secondary)
+        }
+    }
+
+    private func reprocess(_ m: Meeting, reuseTranscript: Bool) {
+        if m.summaryEdited == 1 {
+            reprocessReusesTranscript = reuseTranscript
+            confirmReprocess = true
+        } else {
+            state.reprocess(m.id, reuseTranscript: reuseTranscript)
         }
     }
 
@@ -364,7 +387,7 @@ struct MeetingDetailView: View {
             Text(err.components(separatedBy: "\n").first ?? err)
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
-            Button("Retry") { state.reprocess(m.id) }
+            Button("Retry") { state.reprocess(m.id, reuseTranscript: true) }
         }
         .padding(10)
         .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
@@ -395,7 +418,7 @@ struct MeetingDetailView: View {
                     .frame(minHeight: 100)
                     .padding(6)
                     .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                Text("Tip: Reprocess after editing notes to fold them into the summary.")
+                Text("Tip: Re-summarize after editing notes to fold them into the summary.")
                     .font(.caption).foregroundStyle(.secondary)
             } else if let notes = m.userNotes, !notes.isEmpty {
                 MarkdownBlock(text: notes)
@@ -453,8 +476,9 @@ struct OutputsBar: View {
             .help(integ.configured ? "Send this note to \(integ.label)"
                                    : "\(integ.label) is not configured (see Settings)")
 
-            if let url = latest?.url, latest?.status == "ok", url.hasPrefix("http") {
-                Link(destination: URL(string: url)!) {
+            if let url = latest?.url, latest?.status == "ok", url.hasPrefix("http"),
+               let destination = URL(string: url) {
+                Link(destination: destination) {
                     Image(systemName: "arrow.up.right.square")
                 }
                 .help("Open in \(integ.label)")

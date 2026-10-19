@@ -125,7 +125,9 @@ def build_note(cfg: Config, transcript: str, audio_label: str | None = None,
 def process(cfg: Config, system_wav: str | None, mic_wav: str | None,
             audio_label: str | None = None, user_notes: str | None = None,
             meeting_date: str | None = None, title: str | None = None,
-            on_phase: ProgressFn | None = None) -> ProcessResult:
+            on_phase: ProgressFn | None = None,
+            force_transcribe: bool = False,
+            previous_urls: dict[str, str] | None = None) -> ProcessResult:
     """Full pipeline: transcribe -> summarize -> write enabled outputs."""
     on_phase = on_phase or _noop
 
@@ -142,7 +144,7 @@ def process(cfg: Config, system_wav: str | None, mic_wav: str | None,
     # Reuse a transcript newer than its audio (a retry after a failed
     # summarize step) rather than re-running whisper on the whole meeting.
     transcript, transcript_path = "", None
-    if base is not None:
+    if base is not None and not force_transcribe:
         tp = transcript_path_for(base)
         if tp.is_file():
             wav_mtimes = [Path(w).stat().st_mtime for w in (system_wav, mic_wav)
@@ -160,6 +162,7 @@ def process(cfg: Config, system_wav: str | None, mic_wav: str | None,
                       warnings=warnings)
     if title:
         note.title = title
+    note.previous_urls = dict(previous_urls or {})
 
     on_phase("writing_outputs", None)
     results = write_all(cfg, note)
