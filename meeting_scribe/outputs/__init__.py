@@ -22,6 +22,7 @@ class Note:
     audio_path: str | None = None
     user_notes: str | None = None   # notes typed by the user during the meeting
     warnings: list[str] = field(default_factory=list)  # capture-quality caveats
+    previous_urls: dict[str, str] = field(default_factory=dict)  # last good url per target, for re-push
 
     def full_markdown(self) -> str:
         parts = [

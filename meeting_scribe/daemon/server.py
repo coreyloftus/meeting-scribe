@@ -121,7 +121,17 @@ def _note_from_meeting(m: dict) -> Note:
         audio_path=(m.get("base_path") or None) and m["base_path"] + ".*.wav",
         user_notes=_read_optional(m.get("notes_path")),
         warnings=[w for w in (m.get("warnings") or "").split("\n") if w],
+        previous_urls=_previous_urls(m["id"]),
     )
+
+
+def _previous_urls(meeting_id: str) -> dict[str, str]:
+    """Latest successful url per target (outputs_for is newest first)."""
+    urls: dict[str, str] = {}
+    for o in DB.outputs_for(meeting_id):
+        if o["status"] == "ok" and o.get("url"):
+            urls.setdefault(o["target"], o["url"])
+    return urls
 
 
 # --- job handlers ----------------------------------------------------------------
@@ -148,7 +158,8 @@ def _handle_process(job: Job) -> None:
             on_phase=on_phase,
             # Reprocess re-transcribes; a retry after a failed summary may reuse the transcript.
             force_transcribe=(job.type == "reprocess"
-                              and not job.options.get("reuse_transcript")))
+                              and not job.options.get("reuse_transcript")),
+            previous_urls=_previous_urls(job.meeting_id))
     except Exception as e:
         DB.update_meeting(job.meeting_id, status="failed", error=str(e))
         BUS.publish("meeting_updated", meeting_id=job.meeting_id, status="failed",

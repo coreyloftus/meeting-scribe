@@ -169,7 +169,7 @@ class Database:
     def outputs_for(self, meeting_id: str) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM outputs WHERE meeting_id=? ORDER BY created_at DESC",
+                "SELECT * FROM outputs WHERE meeting_id=? ORDER BY created_at DESC, id DESC",
                 (meeting_id,)).fetchall()
         return [dict(r) for r in rows]
 
