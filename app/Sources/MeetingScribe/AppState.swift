@@ -250,7 +250,9 @@ final class AppState: ObservableObject {
         }
     }
     func push(_ id: String, target: String) { run("push \(target)") { [self] in try await client?.push(id, target: target) } }
-    func reprocess(_ id: String) { run("reprocess") { [self] in try await client?.reprocess(id) } }
+    func reprocess(_ id: String, reuseTranscript: Bool = false) {
+        run("reprocess") { [self] in try await client?.reprocess(id, reuseTranscript: reuseTranscript) }
+    }
     func deleteMeeting(_ id: String, deleteFiles: Bool) {
         run("delete") { [self] in
             try await client?.delete(id, deleteFiles: deleteFiles)

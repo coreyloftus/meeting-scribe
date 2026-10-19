@@ -45,6 +45,7 @@ struct Meeting: Codable, Equatable, Identifiable {
     var slug: String?
     var durationSec: Int?
     var summaryMd: String?
+    var summaryEdited: Int?    // 1 = the user edited the summary
     var error: String?
     var outputs: [OutputRow]?
     var transcript: String?    // detail endpoint only
@@ -210,8 +211,9 @@ struct DaemonClient {
         _ = try await request("POST", "v1/meetings/\(id)/push", body: ["target": target])
     }
 
-    func reprocess(_ id: String) async throws {
-        _ = try await request("POST", "v1/meetings/\(id)/reprocess", body: [:])
+    func reprocess(_ id: String, reuseTranscript: Bool = false) async throws {
+        _ = try await request("POST", "v1/meetings/\(id)/reprocess",
+                              body: ["options": ["reuse_transcript": reuseTranscript]])
     }
 
     func delete(_ id: String, deleteFiles: Bool) async throws {

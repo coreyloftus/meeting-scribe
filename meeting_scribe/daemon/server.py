@@ -143,7 +143,10 @@ def _handle_process(job: Job) -> None:
             audio_label=(m.get("base_path") or "") + ".*.wav",
             meeting_date=(m.get("started_at") or m["id"])[:10],
             title=m.get("title") if m.get("title_edited") else None,
-            on_phase=on_phase)
+            on_phase=on_phase,
+            # Reprocess re-transcribes; a retry after a failed summary may reuse the transcript.
+            force_transcribe=(job.type == "reprocess"
+                              and not job.options.get("reuse_transcript")))
     except Exception as e:
         DB.update_meeting(job.meeting_id, status="failed", error=str(e))
         BUS.publish("meeting_updated", meeting_id=job.meeting_id, status="failed",
@@ -152,7 +155,7 @@ def _handle_process(job: Job) -> None:
 
     note = result.note
     DB.update_meeting(
-        job.meeting_id, status="done", error=None,
+        job.meeting_id, status="done", error=None, summary_edited=0,
         title=note.title, slug=note.slug, summary_md=note.summary_md,
         warnings="\n".join(result.warnings) if result.warnings else None,
         transcript_path=str(result.transcript_path) if result.transcript_path else None)
@@ -371,6 +374,8 @@ def patch_meeting(meeting_id: str, body: MeetingPatch):
     if "title" in fields:
         fields["title"] = (fields["title"] or "").strip() or None
         fields["title_edited"] = 1 if fields["title"] else 0
+    if "summary_md" in fields:
+        fields["summary_edited"] = 1
     if not fields:
         raise HTTPException(status_code=400, detail="nothing to update")
     DB.update_meeting(meeting_id, **fields)
@@ -409,6 +414,8 @@ def post_reprocess(meeting_id: str, body: ReprocessBody | None = None):
         raise HTTPException(status_code=404, detail="unknown meeting")
     if m["status"] == "recording":
         raise HTTPException(status_code=409, detail="meeting is still recording")
+    if m["status"] in INTERRUPTED_STATUSES:
+        raise HTTPException(status_code=409, detail="meeting is already being processed")
     if not (m.get("system_wav") or m.get("mic_wav")):
         raise HTTPException(status_code=409, detail="no audio on disk for this meeting")
     DB.update_meeting(meeting_id, status="queued", error=None)
