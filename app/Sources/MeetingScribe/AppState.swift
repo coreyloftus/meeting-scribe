@@ -242,10 +242,20 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Live notes not yet sent to the daemon; flushed before Stop so the last line isn't lost.
+    var pendingSessionNotes: String?
+
+    func flushSessionNotes() async {
+        guard let text = pendingSessionNotes else { return }
+        pendingSessionNotes = nil
+        try? await client?.saveSessionNotes(text)
+    }
+
     func stopRecording() {
         stopping = true
         run("stop") { [self] in
             defer { stopping = false }
+            await flushSessionNotes()
             try await client?.stop()
         }
     }

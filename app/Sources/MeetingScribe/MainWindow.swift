@@ -210,10 +210,11 @@ struct LiveRecordingView: View {
 
     private func debounceSave(_ text: String) {
         saveTask?.cancel()
+        state.pendingSessionNotes = text
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(800))
             guard !Task.isCancelled else { return }
-            try? await state.client?.saveSessionNotes(text)
+            await state.flushSessionNotes()
         }
     }
 }
