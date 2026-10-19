@@ -8,6 +8,7 @@ Everything lives in ~/.local/state/meeting-scribe/ next to session.json:
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import secrets
@@ -66,3 +67,24 @@ def base_url() -> str | None:
     if not info:
         return None
     return f"http://{info.get('host', DEFAULT_HOST)}:{info.get('port', DEFAULT_PORT)}"
+
+
+def trim_log(max_bytes: int = 5_000_000, keep_bytes: int = 1_000_000) -> None:
+    """Keep the tail of an oversized log. launchd and nohup append, so truncating in place is safe."""
+    try:
+        st = LOG_FILE.stat()
+        if st.st_size <= max_bytes:
+            return
+        # If our stdout writes to this log without O_APPEND, truncating would leave a sparse hole.
+        out = os.fstat(1)
+        if (out.st_ino, out.st_dev) == (st.st_ino, st.st_dev) and \
+                not fcntl.fcntl(1, fcntl.F_GETFL) & os.O_APPEND:
+            return
+        with open(LOG_FILE, "r+b") as f:
+            f.seek(-keep_bytes, os.SEEK_END)
+            tail = f.read()
+            f.seek(0)
+            f.truncate()
+            f.write(tail[tail.find(b"\n") + 1:])
+    except OSError:
+        pass

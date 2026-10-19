@@ -699,12 +699,14 @@ def serve(host: str = state.DEFAULT_HOST, port: int | None = None) -> None:
         if os.path.isdir(_dir) and _dir not in _path.split(os.pathsep):
             _path = _dir + os.pathsep + _path
     os.environ["PATH"] = _path
+    state.trim_log()
     TOKEN = state.ensure_token()
     DB = Database(state.DB_FILE)
     actual_port = _pick_port(host, port or state.DEFAULT_PORT)
     state.write_info(host, actual_port, DAEMON_VERSION)
     print(f"[scribed] v{DAEMON_VERSION} listening on http://{host}:{actual_port}")
-    uvicorn.run(app, host=host, port=actual_port, log_level="info")
+    # No access log: the app polls /v1/status every 2 s, and OAuth callback URLs carry codes.
+    uvicorn.run(app, host=host, port=actual_port, log_level="info", access_log=False)
 
 
 def main(argv: list[str] | None = None) -> int:
