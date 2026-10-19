@@ -616,13 +616,22 @@ def get_doctor():
     def check(key: str, ok: bool, detail: str):
         checks.append({"key": key, "ok": ok, "detail": detail})
 
-    for tool in ("ffmpeg", "ffprobe", c.whisper_cli, "SwitchAudioSource"):
+    tools = ["ffmpeg", "ffprobe", "SwitchAudioSource"]
+    if c.engine != "parakeet":
+        tools.insert(2, c.whisper_cli)
+    for tool in tools:
         path = shutil.which(tool)
         check(f"tool:{tool}", bool(path), path or "not found on PATH")
     check("helper:syscap", HELPER_BIN.exists(),
           str(HELPER_BIN) if HELPER_BIN.exists() else "not built — run scripts/build_helper.sh")
-    model = c.whisper_model
-    check("whisper_model", bool(model and Path(model).is_file()), str(model or "(unset)"))
+    if c.engine == "parakeet":
+        import importlib.util
+        pk = importlib.util.find_spec("parakeet_mlx") is not None
+        check("engine:parakeet", pk,
+              c.parakeet_model if pk else "parakeet-mlx not installed")
+    else:
+        model = c.whisper_model
+        check("engine:whisper", bool(model and Path(model).is_file()), str(model or "(unset)"))
     check("config", bool(c.source), str(c.source or "defaults only"))
     if c.llm_backend == "claude_cli":
         cli = shutil.which(c.claude_cli)
