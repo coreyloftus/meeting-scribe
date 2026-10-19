@@ -497,9 +497,9 @@ def get_config():
 
 @api.put("/v1/config")
 def put_config(body: dict):
-    # Don't let the redaction placeholder overwrite a real secret.
+    # Don't let the redaction placeholder or a blank field overwrite a real secret.
     for path in SECRET_PATHS:
-        if _get_path(body, path) == REDACTED:
+        if _get_path(body, path) in (REDACTED, ""):
             _del_path(body, path)
     try:
         config_mod.write_patch(body)
