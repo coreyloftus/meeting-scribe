@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import socket
+import threading
 import time
 import webbrowser
 from contextlib import asynccontextmanager
@@ -29,7 +30,7 @@ from ..outputs import Note, REGISTRY, write_one
 from ..recorder import HELPER_BIN
 from . import DAEMON_VERSION
 from . import state
-from .db import Database, stamp_to_iso
+from .db import Database
 from .events import EventBus, sse_format
 from .jobs import Job, JobQueue
 
@@ -37,6 +38,8 @@ BUS = EventBus()
 JOBS = JobQueue()
 DB: Database | None = None
 TOKEN: str = ""
+# Start and stop each check, then change, the session file; serialize them.
+RECORDING_LOCK = threading.Lock()
 
 INTERRUPTED_STATUSES = ("queued", "transcribing", "summarizing", "writing_outputs")
 
@@ -307,6 +310,11 @@ async def get_events():
 
 @api.post("/v1/start")
 def post_start():
+    with RECORDING_LOCK:
+        return _start()
+
+
+def _start():
     try:
         s = recorder.start(cfg())
     except recorder.RecorderError as e:
@@ -321,6 +329,11 @@ def post_start():
 
 @api.post("/v1/stop")
 def post_stop():
+    with RECORDING_LOCK:
+        return _stop()
+
+
+def _stop():
     t0 = time.monotonic()
     try:
         s = recorder.stop(cfg())
