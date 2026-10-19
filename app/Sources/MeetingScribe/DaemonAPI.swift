@@ -273,23 +273,28 @@ struct DaemonClient {
     func events() -> AsyncThrowingStream<SSEEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                var req = URLRequest(url: baseURL.appendingPathComponent("v1/events"))
-                req.timeoutInterval = 3600 * 24
-                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                let (bytes, resp) = try await URLSession.shared.bytes(for: req)
-                guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
-                    throw DaemonError.http((resp as? HTTPURLResponse)?.statusCode ?? 0, "SSE")
-                }
-                for try await line in bytes.lines {
-                    guard line.hasPrefix("data: ") else { continue }
-                    let json = String(line.dropFirst(6))
-                    if let data = json.data(using: .utf8),
-                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let type = obj["type"] as? String {
-                        continuation.yield(SSEEvent(type: type, data: obj))
+                do {
+                    var req = URLRequest(url: baseURL.appendingPathComponent("v1/events"))
+                    req.timeoutInterval = 3600 * 24
+                    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                    let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+                    guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
+                        throw DaemonError.http((resp as? HTTPURLResponse)?.statusCode ?? 0, "SSE")
                     }
+                    for try await line in bytes.lines {
+                        guard line.hasPrefix("data: ") else { continue }
+                        let json = String(line.dropFirst(6))
+                        if let data = json.data(using: .utf8),
+                           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                           let type = obj["type"] as? String {
+                            continuation.yield(SSEEvent(type: type, data: obj))
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    // A throwing Task keeps its error, so end the stream explicitly or the consumer hangs.
+                    continuation.finish(throwing: error)
                 }
-                continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }

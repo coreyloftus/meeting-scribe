@@ -54,7 +54,14 @@ final class AppState: ObservableObject {
                 try? await Task.sleep(for: .seconds(2))
                 guard let self else { return }
                 if !self.daemonUp { self.connect() }
-                else if self.eventTask == nil { await self.refreshStatus() }
+                else if self.eventTask == nil {
+                    // The stream dropped (sleep, network change): resync and reopen it.
+                    await self.refreshStatus()
+                    guard self.daemonUp else { continue }
+                    await self.refreshMeetings()
+                    await self.refreshDetail()
+                    self.startEventStream()
+                }
             }
         }
     }
@@ -110,8 +117,8 @@ final class AppState: ObservableObject {
                     self.handle(event)
                 }
             } catch {}
-            // Stream ended/failed: drop to polling; bootstrap loop reconnects.
-            self?.eventTask = nil
+            // Stream ended/failed: the bootstrap loop reconnects. A cancelled task was replaced, so leave the new one.
+            if !Task.isCancelled { self?.eventTask = nil }
         }
     }
 
