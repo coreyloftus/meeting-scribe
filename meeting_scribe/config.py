@@ -24,8 +24,30 @@ EXAMPLE_CONFIG = REPO_ROOT / "config.example.json"
 DEFAULT_BROKER_URL = "https://notion-broker.vercel.app"
 
 
+# Secret config keys, as (path...) tuples: redacted when shown, preserved on PUT.
+SECRET_PATHS = (
+    ("anthropic", "api_key"),
+    ("outputs", "notion", "token"),
+    ("outputs", "notion", "refresh_token"),
+    ("google", "client_secret"),
+)
+REDACTED = "•••"
+
+
 class ConfigError(Exception):
     pass
+
+
+def redacted(data: dict) -> dict:
+    """Deep copy of `data` with every set secret replaced by REDACTED."""
+    out = json.loads(json.dumps(data))
+    for path in SECRET_PATHS:
+        node = out
+        for k in path[:-1]:
+            node = node.get(k) if isinstance(node, dict) else None
+        if isinstance(node, dict) and node.get(path[-1]):
+            node[path[-1]] = REDACTED
+    return out
 
 
 def expand(path: str | None) -> Path | None:
@@ -207,7 +229,17 @@ def write_patch(patch: dict) -> Path:
         except json.JSONDecodeError as e:
             raise ConfigError(f"{source} is not valid JSON") from e
     source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_text(json.dumps(_deep_merge(current, patch), indent=2) + "\n")
+    # The file holds OAuth tokens: write 0600 to a temp file, then swap it in atomically.
+    target = source.resolve()
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(_deep_merge(current, patch), indent=2) + "\n")
+        os.replace(tmp, target)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return source
 
 

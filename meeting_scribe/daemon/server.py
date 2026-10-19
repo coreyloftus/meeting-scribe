@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import html
-import json
 import os
 import shutil
 import socket
@@ -43,14 +42,8 @@ RECORDING_LOCK = threading.Lock()
 
 INTERRUPTED_STATUSES = ("queued", "transcribing", "summarizing", "writing_outputs")
 
-# Secret config keys, as (path...) tuples: redacted on GET, preserved on PUT.
-SECRET_PATHS = (
-    ("anthropic", "api_key"),
-    ("outputs", "notion", "token"),
-    ("outputs", "notion", "refresh_token"),
-    ("google", "client_secret"),
-)
-REDACTED = "•••"
+SECRET_PATHS = config_mod.SECRET_PATHS
+REDACTED = config_mod.REDACTED
 
 
 def cfg():
@@ -470,12 +463,6 @@ def _get_path(d: dict, path: tuple) -> object:
     return d
 
 
-def _set_path(d: dict, path: tuple, value) -> None:
-    for k in path[:-1]:
-        d = d.setdefault(k, {})
-    d[path[-1]] = value
-
-
 def _del_path(d: dict, path: tuple) -> None:
     for k in path[:-1]:
         if not isinstance(d, dict) or k not in d:
@@ -488,11 +475,7 @@ def _del_path(d: dict, path: tuple) -> None:
 @api.get("/v1/config")
 def get_config():
     c = cfg()
-    data = json.loads(json.dumps(c.data))  # deep copy
-    for path in SECRET_PATHS:
-        if _get_path(data, path):
-            _set_path(data, path, REDACTED)
-    return {"config": data, "source": str(c.source) if c.source else None}
+    return {"config": config_mod.redacted(c.data), "source": str(c.source) if c.source else None}
 
 
 @api.put("/v1/config")
