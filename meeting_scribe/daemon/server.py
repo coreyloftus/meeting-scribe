@@ -718,8 +718,9 @@ def serve(host: str = state.DEFAULT_HOST, port: int | None = None) -> None:
     actual_port = _pick_port(host, port or state.DEFAULT_PORT)
     state.write_info(host, actual_port, DAEMON_VERSION)
     print(f"[scribed] v{DAEMON_VERSION} listening on http://{host}:{actual_port}")
-    # No access log: the app polls /v1/status every 2 s, and OAuth callback URLs carry codes.
-    uvicorn.run(app, host=host, port=actual_port, log_level="info", access_log=False)
+    # No access log (2 s status polls, OAuth codes); the open SSE stream would block a graceful stop.
+    uvicorn.run(app, host=host, port=actual_port, log_level="info", access_log=False,
+                timeout_graceful_shutdown=3)
 
 
 def main(argv: list[str] | None = None) -> int:
