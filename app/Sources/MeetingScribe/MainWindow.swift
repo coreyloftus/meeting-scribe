@@ -173,6 +173,8 @@ struct LiveRecordingView: View {
     @State private var notes: String = ""
     @State private var saveTask: Task<Void, Never>?
     @State private var loadedFor: String?
+    @AppStorage("liveShowNotes") private var showNotes = true
+    @AppStorage("liveShowTranscript") private var showTranscript = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -181,24 +183,38 @@ struct LiveRecordingView: View {
                 Text("Recording — \(state.elapsedString)")
                     .font(.title2).monospacedDigit()
                 Spacer()
+                // Each toggle is disabled while it is the only visible panel, so one always stays.
+                Toggle(isOn: $showNotes) { Label("Notes", systemImage: "note.text") }
+                    .disabled(showNotes && !showTranscript)
+                    .help(showNotes ? "Hide notes" : "Show notes")
+                Toggle(isOn: $showTranscript) { Label("Transcript", systemImage: "text.bubble") }
+                    .disabled(showTranscript && !showNotes)
+                    .help(showTranscript ? "Hide live transcript" : "Show live transcript")
             }
-            Text("Type rough notes while you talk — they'll be woven into the AI summary when you stop.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            .toggleStyle(.button)
+            if showNotes {
+                Text("Type rough notes while you talk — they'll be woven into the AI summary when you stop.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
             VSplitView {
-                TextEditor(text: $notes)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                    .onChange(of: notes) { _, newValue in
-                        debounceSave(newValue)
-                    }
-                    .frame(minHeight: 80)
-                    .padding(.bottom, 6)
-                LiveTranscriptPane()
-                    .frame(minHeight: 160, idealHeight: 360)
-                    .padding(.top, 6)
+                if showNotes {
+                    TextEditor(text: $notes)
+                        .font(.body)
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                        .onChange(of: notes) { _, newValue in
+                            debounceSave(newValue)
+                        }
+                        .frame(minHeight: 80)
+                        .padding(.bottom, showTranscript ? 6 : 0)
+                }
+                if showTranscript {
+                    LiveTranscriptPane()
+                        .frame(minHeight: 160, idealHeight: 360)
+                        .padding(.top, showNotes ? 6 : 0)
+                }
             }
         }
         .padding()
