@@ -39,8 +39,21 @@ struct MainWindow: View {
 
 struct TopBar: ToolbarContent {
     @EnvironmentObject var state: AppState
+    @AppStorage("liveShowNotes") private var showNotes = true
+    @AppStorage("liveShowTranscript") private var showTranscript = true
 
     var body: some ToolbarContent {
+        // Shown in every state so the recording layout can be set before a call starts.
+        ToolbarItemGroup(placement: .automatic) {
+            // Each toggle is disabled while it is the only visible panel, so one always stays.
+            Toggle(isOn: $showNotes) { Label("Notes", systemImage: "note.text") }
+                .disabled(showNotes && !showTranscript)
+                .help(showNotes ? "Hide notes while recording" : "Show notes while recording")
+            Toggle(isOn: $showTranscript) { Label("Transcript", systemImage: "text.bubble") }
+                .disabled(showTranscript && !showNotes)
+                .help(showTranscript ? "Hide live transcript while recording"
+                                     : "Show live transcript while recording")
+        }
         ToolbarItem(placement: .primaryAction) {
             if state.stopping {
                 Button {} label: {
@@ -183,16 +196,7 @@ struct LiveRecordingView: View {
                 Text("Recording — \(state.elapsedString)")
                     .font(.title2).monospacedDigit()
                 Spacer()
-                // Each toggle is disabled while it is the only visible panel, so one always stays.
-                Toggle(isOn: $showNotes) { Label("Notes", systemImage: "note.text") }
-                    .disabled(showNotes && !showTranscript)
-                    .help(showNotes ? "Hide notes" : "Show notes")
-                Toggle(isOn: $showTranscript) { Label("Transcript", systemImage: "text.bubble") }
-                    .disabled(showTranscript && !showNotes)
-                    .help(showTranscript ? "Hide live transcript" : "Show live transcript")
             }
-            .toggleStyle(.button)
-            .labelStyle(.iconOnly)
             if showNotes {
                 Text("Type rough notes while you talk — they'll be woven into the AI summary when you stop.")
                     .font(.callout)
