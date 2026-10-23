@@ -1,5 +1,5 @@
 // Main window: meetings list sidebar + detail pane, Granola-style.
-// While recording, the detail pane becomes a live notes editor.
+// While recording, the detail pane becomes a live notes editor plus a trailing transcript.
 import SwiftUI
 
 struct MainWindow: View {
@@ -39,9 +39,29 @@ struct MainWindow: View {
 
 struct TopBar: ToolbarContent {
     @EnvironmentObject var state: AppState
+    @AppStorage("liveShowNotes") private var showNotes = true
+    @AppStorage("liveShowTranscript") private var showTranscript = true
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
+        // Shown in every state so the recording layout can be set before a call starts.
+        ToolbarItemGroup(placement: .automatic) {
+            // Each toggle is disabled while it is the only visible panel, so one always stays.
+            Toggle(isOn: $showNotes) { Label("Notes", systemImage: "note.text") }
+                .disabled(showNotes && !showTranscript)
+                .help(showNotes ? "Hide notes while recording" : "Show notes while recording")
+            Toggle(isOn: $showTranscript) { Label("Transcript", systemImage: "text.bubble") }
+                .disabled(showTranscript && !showNotes)
+                .help(showTranscript ? "Hide live transcript while recording"
+                                     : "Show live transcript while recording")
+        }
+        ToolbarItem(placement: .automatic) {
+            SettingsLink {
+                Image(systemName: "gearshape")
+            }
+            .help("Settings")
+        }
+        // Declared last so it sits at the far right; large and red so it is easy to find.
+        ToolbarItem(placement: .automatic) {
             if state.stopping {
                 Button {} label: {
                     HStack(spacing: 6) {
@@ -55,29 +75,50 @@ struct TopBar: ToolbarContent {
                 Button {
                     state.stopRecording()
                 } label: {
-                    Label("Stop \(state.elapsedString)", systemImage: "stop.circle.fill")
-                        .foregroundStyle(.red)
+                    Label(state.elapsedString, systemImage: "stop.fill")
                         .monospacedDigit()
                 }
-                .help("Stop recording and process in the background")
+                .buttonStyle(RecordButtonStyle())
+                .help("Stop recording and process in the background (⌘R)")
             } else {
                 Button {
                     state.selectedMeetingID = nil
                     state.startRecording()
                 } label: {
-                    Label("Record", systemImage: "record.circle")
+                    Image(systemName: "record.circle")
                 }
+                .buttonStyle(RecordButtonStyle())
+                .accessibilityLabel("Record")
                 .disabled(!state.daemonUp)
-                .help(state.daemonUp ? "Start recording system audio + mic"
+                .help(state.daemonUp ? "Start recording system audio + mic (⌘R)"
                                      : "Daemon not running")
             }
         }
-        ToolbarItem(placement: .automatic) {
-            SettingsLink {
-                Image(systemName: "gearshape")
-            }
-            .help("Settings")
-        }
+    }
+}
+
+/// Red capsule that brightens and grows slightly on hover, and darkens while pressed.
+struct RecordButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(fill(pressed: configuration.isPressed)))
+            .scaleEffect(hovering && isEnabled && !configuration.isPressed ? 1.06 : 1)
+            .opacity(isEnabled ? 1 : 0.4)
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+            .onHover { hovering = $0 }
+    }
+
+    private func fill(pressed: Bool) -> Color {
+        if pressed { return Color(red: 0.70, green: 0.10, blue: 0.10) }
+        return hovering && isEnabled ? Color(red: 1.0, green: 0.30, blue: 0.27) : .red
     }
 }
 
@@ -173,6 +214,8 @@ struct LiveRecordingView: View {
     @State private var notes: String = ""
     @State private var saveTask: Task<Void, Never>?
     @State private var loadedFor: String?
+    @AppStorage("liveShowNotes") private var showNotes = true
+    @AppStorage("liveShowTranscript") private var showTranscript = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -182,17 +225,30 @@ struct LiveRecordingView: View {
                     .font(.title2).monospacedDigit()
                 Spacer()
             }
-            Text("Type rough notes while you talk — they'll be woven into the AI summary when you stop.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            TextEditor(text: $notes)
-                .font(.body)
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                .onChange(of: notes) { _, newValue in
-                    debounceSave(newValue)
+            if showNotes {
+                Text("Type rough notes while you talk — they'll be woven into the AI summary when you stop.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            VSplitView {
+                if showNotes {
+                    TextEditor(text: $notes)
+                        .font(.body)
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                        .onChange(of: notes) { _, newValue in
+                            debounceSave(newValue)
+                        }
+                        .frame(minHeight: 80)
+                        .padding(.bottom, showTranscript ? 6 : 0)
                 }
+                if showTranscript {
+                    LiveTranscriptPane()
+                        .frame(minHeight: 160, idealHeight: 360)
+                        .padding(.top, showNotes ? 6 : 0)
+                }
+            }
         }
         .padding()
         .task(id: state.recordingMeetingID) { await loadExisting() }
@@ -215,6 +271,84 @@ struct LiveRecordingView: View {
             try? await Task.sleep(for: .milliseconds(800))
             guard !Task.isCancelled else { return }
             await state.flushSessionNotes()
+        }
+    }
+}
+
+struct LiveTranscriptPane: View {
+    @EnvironmentObject var state: AppState
+    /// True while the newest line is on screen; scrolling up to read back turns it off.
+    @State private var following = true
+
+    private var live: LiveTranscript? { state.liveTranscript }
+    private var lines: [LiveLine] { live?.lines ?? [] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Live Transcript").font(.headline)
+                Text("Preview — the full transcript is made after you stop.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }
+            ScrollViewReader { proxy in
+                ZStack(alignment: .bottomTrailing) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            if lines.isEmpty {
+                                Text(emptyText).foregroundStyle(.secondary)
+                            }
+                            ForEach(lines) { LiveLineRow(line: $0) }
+                            Color.clear.frame(height: 1).id("bottom")
+                                .onAppear { following = true }
+                                .onDisappear { following = false }
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if !following {
+                        Button {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        } label: {
+                            Label("Latest", systemImage: "arrow.down")
+                        }
+                        .controlSize(.small)
+                        .padding(8)
+                    }
+                }
+                .onChange(of: lines) {
+                    if following { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
+                .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var emptyText: String {
+        switch live?.state {
+        case "loading": return "Loading the speech model…"
+        case "running": return "Listening — lines show up about 10 seconds after someone speaks."
+        case "failed": return "Live transcript stopped: \(live?.error ?? "unknown error"). The recording is not affected."
+        case "off": return "Live transcript needs the Parakeet engine (Settings)."
+        default: return "Connecting…"
+        }
+    }
+}
+
+struct LiveLineRow: View {
+    let line: LiveLine
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(line.timestamp)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
+            (Text(line.speaker + ": ").bold().foregroundColor(line.speaker == "Me" ? .accentColor : .primary)
+             + Text(line.text))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

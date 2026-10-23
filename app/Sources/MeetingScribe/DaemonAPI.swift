@@ -97,6 +97,26 @@ struct DoctorCheck: Codable, Equatable, Identifiable {
     var id: String { key }
 }
 
+struct LiveLine: Codable, Equatable, Identifiable {
+    var startMs: Int
+    var speaker: String
+    var text: String
+    var id: String { "\(startMs)-\(speaker)" }
+
+    var timestamp: String {
+        let s = startMs / 1000
+        return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
+                         : String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+struct LiveTranscript: Codable, Equatable {
+    var meetingId: String?
+    var state: String          // off | loading | running | failed
+    var error: String?
+    var lines: [LiveLine]
+}
+
 struct SSEEvent {
     var type: String
     var data: [String: Any]
@@ -235,6 +255,10 @@ struct DaemonClient {
 
     func saveSessionNotes(_ notes: String) async throws {
         _ = try await request("PUT", "v1/session/notes", body: ["notes": notes])
+    }
+
+    func liveTranscript() async throws -> LiveTranscript {
+        try await get("v1/session/live-transcript", as: LiveTranscript.self)
     }
 
     func integrations() async throws -> IntegrationsResponse {

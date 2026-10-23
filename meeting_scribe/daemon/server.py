@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .. import config as config_mod
+from .. import live as live_mod
 from .. import process as process_mod
 from .. import recorder
 from ..outputs import Note, REGISTRY, write_one
@@ -41,6 +42,8 @@ TOKEN: str = ""
 RECORDING_LOCK = threading.Lock()
 # Browser consent runs on a background thread; the app learns the result via integrations_changed.
 GOOGLE_CONNECT = {"running": False, "error": None}
+# Trailing transcript of the current recording; None when not recording.
+LIVE: live_mod.LiveTranscript | None = None
 
 INTERRUPTED_STATUSES = ("queued", "transcribing", "summarizing", "writing_outputs")
 
@@ -219,6 +222,7 @@ def reconcile(db: Database) -> None:
                 "system_wav": s.system_wav, "mic_wav": s.mic_wav}
         if recorder.is_recording():
             db.upsert_meeting(mid, status="recording", **base)
+            _start_live(s)
             print(f"[scribed] resumed tracking live recording {mid}")
         else:
             db.upsert_meeting(mid, status="recorded",
@@ -229,6 +233,26 @@ def reconcile(db: Database) -> None:
     for m in db.meetings_in_status("recording"):
         if not recorder.is_recording() or Path(recorder.load_session().base).name != m["id"]:
             db.update_meeting(m["id"], status="recorded")
+
+
+def _start_live(s: recorder.Session) -> None:
+    global LIVE
+    _stop_live()
+    c = cfg()
+    if c.engine != "parakeet":
+        return
+    mid = Path(s.base).name
+    LIVE = live_mod.LiveTranscript(
+        c, mid, s.system_wav, s.mic_wav,
+        on_update=lambda: BUS.publish("live_transcript", meeting_id=mid))
+    LIVE.start()
+
+
+def _stop_live() -> None:
+    global LIVE
+    if LIVE is not None:
+        LIVE.stop()
+        LIVE = None
 
 
 async def _ticker() -> None:
@@ -332,6 +356,7 @@ def _start():
     mid = Path(s.base).name
     DB.upsert_meeting(mid, base_path=s.base, started_at=s.started_at,
                       status="recording", system_wav=s.system_wav, mic_wav=s.mic_wav)
+    _start_live(s)
     BUS.publish("recording_started", meeting_id=mid, started_at=s.started_at)
     return {"meeting": meeting_public(DB.get_meeting(mid))}
 
@@ -348,6 +373,8 @@ def _stop():
         s = recorder.stop(cfg())
     except recorder.RecorderError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    finally:
+        _stop_live()
     print(f"[scribed] captures stopped in {time.monotonic() - t0:.2f}s", flush=True)
     mid = Path(s.base).name
     ended = datetime.now().isoformat(timespec="seconds")
@@ -418,6 +445,14 @@ def put_session_notes(body: NotesBody):
     if s is None or not recorder.is_recording():
         raise HTTPException(status_code=409, detail="no active recording")
     return put_meeting_notes(Path(s.base).name, body)
+
+
+@api.get("/v1/session/live-transcript")
+def get_live_transcript():
+    live = LIVE
+    if live is None:
+        return {"meeting_id": None, "state": "off", "error": None, "lines": []}
+    return live.snapshot()
 
 
 @api.post("/v1/meetings/{meeting_id}/reprocess")
