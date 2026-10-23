@@ -192,6 +192,7 @@ struct LiveRecordingView: View {
                     .help(showTranscript ? "Hide live transcript" : "Show live transcript")
             }
             .toggleStyle(.button)
+            .labelStyle(.iconOnly)
             if showNotes {
                 Text("Type rough notes while you talk — they'll be woven into the AI summary when you stop.")
                     .font(.callout)
