@@ -4,6 +4,8 @@ Record a meeting on your Mac, transcribe it **locally** with Parakeet (MLX), the
 Claude to turn it into labelled notes, action items, and key decisions — filed
 automatically into Notion and/or a local markdown vault.
 
+![Meeting Scribe showing a meeting's action items, decisions, and takeaways (demo meetings)](docs/screenshot.png)
+
 - **No virtual audio device, no menu-bar app.** System audio is captured with
   Apple's **ScreenCaptureKit** (macOS 13+) — so there's nothing living in your
   menu bar, and your volume keys keep working. (No BlackHole, no Background Music.)
