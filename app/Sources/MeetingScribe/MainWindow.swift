@@ -137,8 +137,12 @@ struct MeetingListView: View {
                 }
                 .padding(.vertical, 4)
             }
-            ForEach(state.meetings) { m in
-                MeetingRow(meeting: m).tag(m.id)
+            ForEach(sections, id: \.title) { section in
+                Section(section.title) {
+                    ForEach(section.meetings) { m in
+                        MeetingRow(meeting: m).tag(m.id)
+                    }
+                }
             }
         }
         .searchable(text: $state.searchQuery, placement: .sidebar, prompt: "Search meetings")
@@ -146,63 +150,76 @@ struct MeetingListView: View {
             Task { await state.refreshMeetings() }
         }
     }
+
+    /// Meetings grouped by day: Today, Yesterday, This Week, then by month.
+    private var sections: [(title: String, meetings: [Meeting])] {
+        let cal = Calendar.current
+        var out: [(title: String, meetings: [Meeting])] = []
+        for m in state.meetings {
+            var title = "Undated"
+            if let d = meetingDate(m) {
+                let days = cal.dateComponents([.day], from: cal.startOfDay(for: d),
+                                              to: cal.startOfDay(for: .now)).day ?? 0
+                title = days == 0 ? "Today" : days == 1 ? "Yesterday" : days < 7 ? "This Week"
+                    : d.formatted(.dateTime.month(.wide).year())
+            }
+            if out.last?.title == title { out[out.count - 1].meetings.append(m) }
+            else { out.append((title, [m])) }
+        }
+        return out
+    }
 }
 
 struct MeetingRow: View {
     let meeting: Meeting
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                StatusChip(status: meeting.status)
-                Text(meeting.displayTitle)
-                    .lineLimit(1)
-                    .font(.body)
-            }
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
-                Text(meeting.id.prefix(10))
-                if let d = meeting.durationSec {
-                    Text("· \(d / 60)m")
-                }
-                ForEach(uniqueTargets(), id: \.0) { target, ok in
-                    Text("\(target)\(ok ? " ✓" : " ✗")")
-                        .padding(.horizontal, 4)
-                        .background(ok ? Color.green.opacity(0.15) : Color.red.opacity(0.15))
-                        .clipShape(Capsule())
-                }
+                Text(rowTitle(meeting))
+                    .lineLimit(1)
+                    .font(.body.weight(.medium))
+                Spacer(minLength: 4)
+                StatusGlyph(status: meeting.status)
+            }
+            HStack(spacing: 8) {
+                if let d = meetingDate(meeting) { Text(d.formatted(date: .omitted, time: .shortened)) }
+                if let sec = meeting.durationSec { Text(durationText(sec)) }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 2)
-    }
-
-    private func uniqueTargets() -> [(String, Bool)] {
-        var seen: [String: Bool] = [:]
-        for o in (meeting.outputs ?? []).reversed() {   // latest attempt wins
-            seen[o.target] = (o.status == "ok")
-        }
-        return seen.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+        .padding(.vertical, 4)
     }
 }
 
-struct StatusChip: View {
+/// The section header already shows the day, so drop a leading "2026-10-23 " from titles.
+func rowTitle(_ m: Meeting) -> String {
+    guard var t = m.title, !t.isEmpty else { return m.status == "recording" ? "Recording now" : "Untitled meeting" }
+    if t.count > 11, t.prefix(10).allSatisfy({ $0.isNumber || $0 == "-" }), t.dropFirst(10).first == " " {
+        t = String(t.dropFirst(11))
+    }
+    return t.prefix(1).uppercased() + t.dropFirst()
+}
+
+/// Only states that need attention get a glyph; finished meetings stay quiet.
+struct StatusGlyph: View {
     let status: String
 
     var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 8, height: 8)
-            .help(status)
-    }
-
-    private var color: Color {
         switch status {
-        case "recording": return .red
-        case "done": return .green
-        case "failed": return .orange
-        case "recorded": return .gray
-        default: return .blue // processing phases
+        case "recording":
+            RecordingDot(size: 8).help("Recording")
+        case "failed":
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                .font(.caption).help("Processing failed")
+        case "recorded":
+            Image(systemName: "circle.dashed").foregroundStyle(.secondary)
+                .font(.caption).help("Not processed yet")
+        case "done":
+            EmptyView()
+        default:
+            ProgressView().controlSize(.mini).help(status.capitalized)
         }
     }
 }
@@ -218,40 +235,58 @@ struct LiveRecordingView: View {
     @AppStorage("liveShowTranscript") private var showTranscript = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "record.circle.fill").foregroundStyle(.red)
-                Text("Recording — \(state.elapsedString)")
-                    .font(.title2).monospacedDigit()
-                Spacer()
-            }
-            if showNotes {
-                Text("Type rough notes while you talk — they'll be woven into the AI summary when you stop.")
-                    .font(.callout)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 14) {
+                RecordingDot(size: 14)
+                Text(state.elapsedString)
+                    .font(.system(size: 44, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                Text("Recording")
+                    .font(.title3.weight(.medium))
                     .foregroundStyle(.secondary)
+                Spacer()
             }
             VSplitView {
                 if showNotes {
-                    TextEditor(text: $notes)
-                        .font(.body)
-                        .scrollContentBackground(.hidden)
-                        .padding(8)
-                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                        .onChange(of: notes) { _, newValue in
-                            debounceSave(newValue)
-                        }
-                        .frame(minHeight: 80)
-                        .padding(.bottom, showTranscript ? 6 : 0)
+                    notesSheet
+                        .frame(minHeight: 100)
+                        .padding(.bottom, showTranscript ? 8 : 0)
                 }
                 if showTranscript {
                     LiveTranscriptPane()
-                        .frame(minHeight: 160, idealHeight: 360)
-                        .padding(.top, showNotes ? 6 : 0)
+                        .frame(minHeight: 180, idealHeight: 420)
+                        .padding(.top, showNotes ? 8 : 0)
                 }
             }
         }
-        .padding()
+        .padding(24)
+        // The red wash marks the window as live; it is the only color the window gets.
+        .background(alignment: .top) {
+            LinearGradient(colors: [.red.opacity(0.16), .clear], startPoint: .top, endPoint: .center)
+                .ignoresSafeArea()
+        }
         .task(id: state.recordingMeetingID) { await loadExisting() }
+    }
+
+    private var notesSheet: some View {
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $notes)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .padding(14)
+                .onChange(of: notes) { _, newValue in
+                    debounceSave(newValue)
+                }
+            if notes.isEmpty {
+                Text("Notes for the summary. What you type here is added to it when you stop.")
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 19)
+                    .padding(.vertical, 14)
+                    .allowsHitTesting(false)
+            }
+        }
+        .glassSheet()
     }
 
     private func loadExisting() async {
@@ -284,71 +319,68 @@ struct LiveTranscriptPane: View {
     private var lines: [LiveLine] { live?.lines ?? [] }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Live Transcript").font(.headline)
-                Text("Preview — the full transcript is made after you stop.")
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Live transcript").font(.headline)
+                Text("Preview. The full transcript is made after you stop.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
             }
+            .padding(.horizontal, 18)
+            .padding(.top, 14)
+            .padding(.bottom, 6)
             ScrollViewReader { proxy in
-                ZStack(alignment: .bottomTrailing) {
+                ZStack(alignment: .bottom) {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 8) {
+                        LazyVStack(alignment: .leading, spacing: 10) {
                             if lines.isEmpty {
                                 Text(emptyText).foregroundStyle(.secondary)
                             }
-                            ForEach(lines) { LiveLineRow(line: $0) }
+                            ForEach(Array(lines.enumerated()), id: \.element.id) { i, line in
+                                TranscriptBubble(speaker: line.speaker, text: line.text,
+                                                 timestamp: line.timestamp,
+                                                 showsHeader: i == 0 || lines[i - 1].speaker != line.speaker)
+                            }
                             Color.clear.frame(height: 1).id("bottom")
                                 .onAppear { following = true }
                                 .onDisappear { following = false }
                         }
-                        .padding(8)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if !following {
                         Button {
-                            proxy.scrollTo("bottom", anchor: .bottom)
+                            withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
                         } label: {
                             Label("Latest", systemImage: "arrow.down")
+                                .padding(.horizontal, 6)
                         }
-                        .controlSize(.small)
-                        .padding(8)
+                        .buttonStyle(.borderless)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .glassSheet(cornerRadius: 16)
+                        .padding(12)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
+                .animation(.easeOut(duration: 0.2), value: following)
                 .onChange(of: lines) {
                     if following { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
                 .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             }
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
         }
+        .glassSheet()
     }
 
     private var emptyText: String {
         switch live?.state {
         case "loading": return "Loading the speech model…"
-        case "running": return "Listening — lines show up about 10 seconds after someone speaks."
+        case "running": return "Listening. Lines show up about 10 seconds after someone speaks."
         case "failed": return "Live transcript stopped: \(live?.error ?? "unknown error"). The recording is not affected."
         case "off": return "Live transcript needs the Parakeet engine (Settings)."
         default: return "Connecting…"
-        }
-    }
-}
-
-struct LiveLineRow: View {
-    let line: LiveLine
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(line.timestamp)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 44, alignment: .trailing)
-            (Text(line.speaker + ": ").bold().foregroundColor(line.speaker == "Me" ? .accentColor : .primary)
-             + Text(line.text))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -371,7 +403,7 @@ struct MeetingDetailView: View {
     var body: some View {
         if let m = state.detail {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 20) {
                     header(m)
                     OutputsBar(meeting: m)
                     if m.status == "failed", let err = m.error {
@@ -381,6 +413,9 @@ struct MeetingDetailView: View {
                         summaryEditor(m)
                     } else if let summary = m.summaryMd {
                         MarkdownBlock(text: summary)
+                            .padding(22)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .glassSheet()
                     } else if m.isProcessing {
                         HStack(spacing: 8) {
                             ProgressView().controlSize(.small)
@@ -395,7 +430,8 @@ struct MeetingDetailView: View {
                     notesSection(m)
                     transcriptSection(m)
                 }
-                .padding()
+                .padding(28)
+                .frame(maxWidth: 860, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .onChange(of: m.id) {
@@ -437,14 +473,16 @@ struct MeetingDetailView: View {
                     Button("Cancel") { titleEditing = false }
                 }
             } else {
-                Text(m.displayTitle).font(.title.bold()).textSelection(.enabled)
+                Text(rowTitle(m))
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .textSelection(.enabled)
             }
-            HStack(spacing: 10) {
-                StatusChip(status: m.status)
-                Text(m.startedAt?.replacingOccurrences(of: "T", with: "  ") ?? m.id)
-                if let d = m.durationSec {
-                    Text("· \(d / 60)m \(d % 60)s")
+            HStack(spacing: 8) {
+                if let d = meetingDate(m) {
+                    Text(d.formatted(.dateTime.weekday(.wide).month(.wide).day().hour().minute())).chip()
                 }
+                if let sec = m.durationSec { Text(durationText(sec)).chip() }
+                if m.status != "done" { Text(statusText(m.status)).chip() }
                 Spacer()
                 Menu {
                     Button("Rename…") {
@@ -474,6 +512,17 @@ struct MeetingDetailView: View {
             }
             .font(.callout)
             .foregroundStyle(.secondary)
+        }
+        .padding(.bottom, 4)
+    }
+
+    private func statusText(_ status: String) -> String {
+        switch status {
+        case "recording": return "Recording"
+        case "recorded": return "Not processed"
+        case "failed": return "Failed"
+        case "writing_outputs": return "Saving…"
+        default: return status.capitalized + "…"
         }
     }
 
@@ -529,9 +578,9 @@ struct MeetingDetailView: View {
 
     @ViewBuilder
     private func notesSection(_ m: Meeting) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("My Notes").font(.headline)
+                Text("My notes").font(.headline)
                 Spacer()
                 if notesEditing {
                     Button("Save") {
@@ -540,7 +589,7 @@ struct MeetingDetailView: View {
                     }
                     Button("Cancel") { notesEditing = false }
                 } else {
-                    Button(m.userNotes == nil ? "Add Notes" : "Edit") {
+                    Button(m.userNotes == nil ? "Add notes" : "Edit") {
                         notesDraft = m.userNotes ?? ""
                         notesEditing = true
                     }
@@ -558,19 +607,42 @@ struct MeetingDetailView: View {
                 MarkdownBlock(text: notes)
             }
         }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassSheet()
     }
 
     @ViewBuilder
     private func transcriptSection(_ m: Meeting) -> some View {
         if let t = m.transcript, !t.isEmpty {
-            DisclosureGroup("Full Transcript", isExpanded: $transcriptExpanded) {
-                Text(t)
-                    .font(.callout)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 6)
+            VStack(alignment: .leading, spacing: 12) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) { transcriptExpanded.toggle() }
+                } label: {
+                    HStack {
+                        Text("Transcript").font(.headline)
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .rotationEffect(.degrees(transcriptExpanded ? 0 : -90))
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if transcriptExpanded {
+                    let lines = transcriptLines(t)
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
+                            TranscriptBubble(speaker: line.speaker, text: line.text,
+                                             showsHeader: !line.speaker.isEmpty
+                                                && (i == 0 || lines[i - 1].speaker != line.speaker))
+                        }
+                    }
+                }
             }
-            .font(.headline)
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassSheet()
         }
     }
 }
@@ -613,13 +685,13 @@ struct OutputsBar: View {
             if let url = latest?.url, latest?.status == "ok", url.hasPrefix("http"),
                let destination = URL(string: url) {
                 Link(destination: destination) {
-                    Image(systemName: "arrow.up.right.square")
+                    Image(systemName: "arrow.up.right")
                 }
                 .help("Open in \(integ.label)")
             }
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonBorderShape(.capsule)
     }
 
     private func pushLabel(_ integ: IntegrationInfo, pushed: Bool) -> String {
