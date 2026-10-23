@@ -24,10 +24,33 @@ struct MeetingScribeApp: App {
                 .frame(minWidth: 780, minHeight: 480)
         }
         .defaultSize(width: 980, height: 640)
+        .commands { RecordingCommands(state: state) }
 
         Settings {
             SettingsView()
                 .environmentObject(state)
+        }
+    }
+}
+
+/// ⌘R starts or stops a recording whenever the app is frontmost, like the toolbar button.
+struct RecordingCommands: Commands {
+    @ObservedObject var state: AppState
+
+    var body: some Commands {
+        CommandMenu("Recording") {
+            if state.isRecording {
+                Button("Stop Recording") { state.stopRecording() }
+                    .keyboardShortcut("r")
+                    .disabled(state.stopping)
+            } else {
+                Button("Start Recording") {
+                    state.selectedMeetingID = nil
+                    state.startRecording()
+                }
+                .keyboardShortcut("r")
+                .disabled(!state.daemonUp)
+            }
         }
     }
 }

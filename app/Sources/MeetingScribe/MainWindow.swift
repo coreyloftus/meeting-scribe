@@ -54,7 +54,14 @@ struct TopBar: ToolbarContent {
                 .help(showTranscript ? "Hide live transcript while recording"
                                      : "Show live transcript while recording")
         }
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItem(placement: .automatic) {
+            SettingsLink {
+                Image(systemName: "gearshape")
+            }
+            .help("Settings")
+        }
+        // Declared last so it sits at the far right; large and red so it is easy to find.
+        ToolbarItem(placement: .automatic) {
             if state.stopping {
                 Button {} label: {
                     HStack(spacing: 6) {
@@ -69,10 +76,13 @@ struct TopBar: ToolbarContent {
                     state.stopRecording()
                 } label: {
                     Label("Stop \(state.elapsedString)", systemImage: "stop.circle.fill")
-                        .foregroundStyle(.red)
                         .monospacedDigit()
                 }
-                .help("Stop recording and process in the background")
+                .labelStyle(.titleAndIcon)
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .controlSize(.large)
+                .help("Stop recording and process in the background (⌘R)")
             } else {
                 Button {
                     state.selectedMeetingID = nil
@@ -80,16 +90,14 @@ struct TopBar: ToolbarContent {
                 } label: {
                     Label("Record", systemImage: "record.circle")
                 }
+                .labelStyle(.titleAndIcon)
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .controlSize(.large)
                 .disabled(!state.daemonUp)
-                .help(state.daemonUp ? "Start recording system audio + mic"
+                .help(state.daemonUp ? "Start recording system audio + mic (⌘R)"
                                      : "Daemon not running")
             }
-        }
-        ToolbarItem(placement: .automatic) {
-            SettingsLink {
-                Image(systemName: "gearshape")
-            }
-            .help("Settings")
         }
     }
 }
