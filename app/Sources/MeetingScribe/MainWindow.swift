@@ -1,5 +1,5 @@
 // Main window: meetings list sidebar + detail pane, Granola-style.
-// While recording, the detail pane becomes a live notes editor.
+// While recording, the detail pane becomes a live notes editor plus a trailing transcript.
 import SwiftUI
 
 struct MainWindow: View {
@@ -185,14 +185,21 @@ struct LiveRecordingView: View {
             Text("Type rough notes while you talk — they'll be woven into the AI summary when you stop.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            TextEditor(text: $notes)
-                .font(.body)
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                .onChange(of: notes) { _, newValue in
-                    debounceSave(newValue)
-                }
+            VSplitView {
+                TextEditor(text: $notes)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                    .onChange(of: notes) { _, newValue in
+                        debounceSave(newValue)
+                    }
+                    .frame(minHeight: 80)
+                    .padding(.bottom, 6)
+                LiveTranscriptPane()
+                    .frame(minHeight: 160, idealHeight: 360)
+                    .padding(.top, 6)
+            }
         }
         .padding()
         .task(id: state.recordingMeetingID) { await loadExisting() }
@@ -215,6 +222,84 @@ struct LiveRecordingView: View {
             try? await Task.sleep(for: .milliseconds(800))
             guard !Task.isCancelled else { return }
             await state.flushSessionNotes()
+        }
+    }
+}
+
+struct LiveTranscriptPane: View {
+    @EnvironmentObject var state: AppState
+    /// True while the newest line is on screen; scrolling up to read back turns it off.
+    @State private var following = true
+
+    private var live: LiveTranscript? { state.liveTranscript }
+    private var lines: [LiveLine] { live?.lines ?? [] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Live Transcript").font(.headline)
+                Text("Preview — the full transcript is made after you stop.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }
+            ScrollViewReader { proxy in
+                ZStack(alignment: .bottomTrailing) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            if lines.isEmpty {
+                                Text(emptyText).foregroundStyle(.secondary)
+                            }
+                            ForEach(lines) { LiveLineRow(line: $0) }
+                            Color.clear.frame(height: 1).id("bottom")
+                                .onAppear { following = true }
+                                .onDisappear { following = false }
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if !following {
+                        Button {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        } label: {
+                            Label("Latest", systemImage: "arrow.down")
+                        }
+                        .controlSize(.small)
+                        .padding(8)
+                    }
+                }
+                .onChange(of: lines) {
+                    if following { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
+                .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var emptyText: String {
+        switch live?.state {
+        case "loading": return "Loading the speech model…"
+        case "running": return "Listening — lines show up about 10 seconds after someone speaks."
+        case "failed": return "Live transcript stopped: \(live?.error ?? "unknown error"). The recording is not affected."
+        case "off": return "Live transcript needs the Parakeet engine (Settings)."
+        default: return "Connecting…"
+        }
+    }
+}
+
+struct LiveLineRow: View {
+    let line: LiveLine
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(line.timestamp)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
+            (Text(line.speaker + ": ").bold().foregroundColor(line.speaker == "Me" ? .accentColor : .primary)
+             + Text(line.text))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

@@ -19,6 +19,7 @@ final class AppState: ObservableObject {
     @Published var lastError: String?
     @Published var searchQuery: String = ""
     @Published var stopping = false
+    @Published var liveTranscript: LiveTranscript?
     /// Set by MenuBarLabel, which has access to SwiftUI's openWindow action.
     var openMainWindow: (() -> Void)?
 
@@ -60,6 +61,7 @@ final class AppState: ObservableObject {
                     guard self.daemonUp else { continue }
                     await self.refreshMeetings()
                     await self.refreshDetail()
+                    await self.refreshLiveTranscript()
                     self.startEventStream()
                 }
             }
@@ -128,7 +130,10 @@ final class AppState: ObservableObject {
             elapsedSec = e.data["elapsed_sec"] as? Int ?? elapsedSec
         case "recording_started", "recording_stopped":
             elapsedSec = 0
-            Task { await refreshStatus(); await refreshMeetings() }
+            liveTranscript = nil
+            Task { await refreshStatus(); await refreshMeetings(); await refreshLiveTranscript() }
+        case "live_transcript":
+            Task { await refreshLiveTranscript() }
         case "job_progress":
             Task { await refreshStatus() }
             if let mid = e.data["meeting_id"] as? String, let phase = e.data["phase"] as? String,
@@ -148,7 +153,7 @@ final class AppState: ObservableObject {
                 integrationsChanges += 1
             }
         case "hello":
-            Task { await refreshStatus() }
+            Task { await refreshStatus(); await refreshLiveTranscript() }
         default:
             break
         }
@@ -177,6 +182,11 @@ final class AppState: ObservableObject {
     func refreshDetail() async {
         guard let c = client, let id = selectedMeetingID else { detail = nil; return }
         detail = try? await c.meeting(id)
+    }
+
+    func refreshLiveTranscript() async {
+        guard let c = client else { return }
+        liveTranscript = try? await c.liveTranscript()
     }
 
     func refreshIntegrations() async {
