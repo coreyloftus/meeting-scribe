@@ -75,30 +75,50 @@ struct TopBar: ToolbarContent {
                 Button {
                     state.stopRecording()
                 } label: {
-                    Label("Stop \(state.elapsedString)", systemImage: "stop.circle.fill")
+                    Label(state.elapsedString, systemImage: "stop.fill")
                         .monospacedDigit()
                 }
-                .labelStyle(.titleAndIcon)
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .controlSize(.large)
+                .buttonStyle(RecordButtonStyle())
                 .help("Stop recording and process in the background (⌘R)")
             } else {
                 Button {
                     state.selectedMeetingID = nil
                     state.startRecording()
                 } label: {
-                    Label("Record", systemImage: "record.circle")
+                    Image(systemName: "record.circle")
                 }
-                .labelStyle(.titleAndIcon)
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .controlSize(.large)
+                .buttonStyle(RecordButtonStyle())
+                .accessibilityLabel("Record")
                 .disabled(!state.daemonUp)
                 .help(state.daemonUp ? "Start recording system audio + mic (⌘R)"
                                      : "Daemon not running")
             }
         }
+    }
+}
+
+/// Red capsule that brightens and grows slightly on hover, and darkens while pressed.
+struct RecordButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(fill(pressed: configuration.isPressed)))
+            .scaleEffect(hovering && isEnabled && !configuration.isPressed ? 1.06 : 1)
+            .opacity(isEnabled ? 1 : 0.4)
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+            .onHover { hovering = $0 }
+    }
+
+    private func fill(pressed: Bool) -> Color {
+        if pressed { return Color(red: 0.70, green: 0.10, blue: 0.10) }
+        return hovering && isEnabled ? Color(red: 1.0, green: 0.30, blue: 0.27) : .red
     }
 }
 
