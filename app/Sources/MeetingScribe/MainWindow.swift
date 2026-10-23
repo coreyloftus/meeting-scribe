@@ -60,39 +60,51 @@ struct TopBar: ToolbarContent {
             }
             .help("Settings")
         }
-        // Declared last so it sits at the far right; large and red so it is easy to find.
-        ToolbarItem(placement: .automatic) {
-            if state.stopping {
-                Button {} label: {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text("Stopping…")
-                    }
+        // Last, so it sits far right; its own slot on macOS 26 keeps the shared glass from clipping it.
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed)
+            ToolbarItem(placement: .automatic) { recordButton }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .automatic) { recordButton }
+        }
+    }
+
+    @ViewBuilder
+    private var recordButton: some View {
+        if state.stopping {
+            Button {} label: {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Stopping…")
                 }
-                .disabled(true)
-                .help("Finalizing the audio files")
-            } else if state.isRecording {
-                Button {
-                    state.stopRecording()
-                } label: {
-                    Label(state.elapsedString, systemImage: "stop.fill")
-                        .monospacedDigit()
-                }
-                .buttonStyle(RecordButtonStyle())
-                .help("Stop recording and process in the background (⌘R)")
-            } else {
-                Button {
-                    state.selectedMeetingID = nil
-                    state.startRecording()
-                } label: {
-                    Image(systemName: "record.circle")
-                }
-                .buttonStyle(RecordButtonStyle())
-                .accessibilityLabel("Record")
-                .disabled(!state.daemonUp)
-                .help(state.daemonUp ? "Start recording system audio + mic (⌘R)"
-                                     : "Daemon not running")
             }
+            .disabled(true)
+            .help("Finalizing the audio files")
+        } else if state.isRecording {
+            Button {
+                state.stopRecording()
+            } label: {
+                // Not a Label: toolbars draw labels as icon only, which hid the timer.
+                HStack(spacing: 6) {
+                    Image(systemName: "stop.fill")
+                    Text(state.elapsedString).monospacedDigit()
+                }
+            }
+            .buttonStyle(RecordButtonStyle())
+            .help("Stop recording and process in the background (⌘R)")
+        } else {
+            Button {
+                state.selectedMeetingID = nil
+                state.startRecording()
+            } label: {
+                Image(systemName: "record.circle")
+            }
+            .buttonStyle(RecordButtonStyle())
+            .accessibilityLabel("Record")
+            .disabled(!state.daemonUp)
+            .help(state.daemonUp ? "Start recording system audio + mic (⌘R)"
+                                 : "Daemon not running")
         }
     }
 }
@@ -106,8 +118,8 @@ struct RecordButtonStyle: ButtonStyle {
         configuration.label
             .font(.body.weight(.semibold))
             .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 4)
             .background(Capsule().fill(fill(pressed: configuration.isPressed)))
             .scaleEffect(hovering && isEnabled && !configuration.isPressed ? 1.06 : 1)
             .opacity(isEnabled ? 1 : 0.4)
