@@ -147,7 +147,9 @@ def cmd_process(args) -> int:
         print(f"No audio found at: {args.path}", file=sys.stderr)
         return 1
     try:
-        result = process(cfg, sys_wav, mic_wav, audio_label=label)
+        stamp = Path(label).name.split(".")[0]
+        result = process(cfg, sys_wav, mic_wav, audio_label=label,
+                         meeting_date=stamp[:10] if STAMP_RE.match(stamp) else None)
         for line in result.lines():
             print(f"  {line}")
     except Exception as e:
