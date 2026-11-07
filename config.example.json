@@ -10,7 +10,8 @@
     "dir": "~/Recordings/meetings",
     "capture_system_audio": true,
     "capture_mic": true,
-    "mic_device": null
+    "mic_device": null,
+    "compress_after_processing": true
   },
   "transcription": {
     "engine": "parakeet",

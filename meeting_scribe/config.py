@@ -134,6 +134,10 @@ class Config:
     def mic_device(self) -> str | None:
         return self.get("recording", "mic_device", default=None)
 
+    @property
+    def compress_audio(self) -> bool:
+        return bool(self.get("recording", "compress_after_processing", default=True))
+
     # --- transcription ------------------------------------------------------
     @property
     def engine(self) -> str:

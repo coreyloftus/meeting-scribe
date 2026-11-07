@@ -8,6 +8,7 @@ clocked at 24 kHz and played back at half speed, an octave low ("underwater").
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -80,3 +81,27 @@ def looks_like_lowquality_bluetooth(mic_wav: Path) -> int | None:
     if rate is not None and rate < 32000:
         return rate
     return None
+
+
+def _pcm_md5(path: Path) -> str | None:
+    res = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", str(path),
+                          "-map", "0:a", "-f", "md5", "-"], capture_output=True, text=True)
+    return res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else None
+
+
+def compress_to_flac(wav: Path) -> Path:
+    """Losslessly re-encode a wav to a sibling .flac, verify the PCM matches, delete the wav."""
+    flac = wav.with_suffix(".flac")
+    part = wav.with_suffix(".flac.part")
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(wav),
+                    "-c:a", "flac", "-compression_level", "8", "-f", "flac", str(part)],
+                   capture_output=True, check=True)
+    src_md5 = _pcm_md5(wav)
+    if src_md5 is None or src_md5 != _pcm_md5(part):
+        part.unlink(missing_ok=True)
+        raise RuntimeError(f"FLAC audio did not match {wav.name}; kept the wav")
+    st = wav.stat()
+    os.utime(part, (st.st_atime, st.st_mtime))  # keeps the transcript-newer-than-audio check valid
+    part.replace(flac)
+    wav.unlink()
+    return flac

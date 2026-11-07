@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from .. import audio
 from .. import config as config_mod
 from .. import live as live_mod
 from .. import process as process_mod
@@ -121,11 +122,33 @@ def _note_from_meeting(m: dict) -> Note:
         slug=slug,
         summary_md=m["summary_md"],
         transcript=_read_optional(m.get("transcript_path")) or "",
-        audio_path=(m.get("base_path") or None) and m["base_path"] + ".*.wav",
+        audio_path=_audio_label(m),
         user_notes=_read_optional(m.get("notes_path")),
         warnings=[w for w in (m.get("warnings") or "").split("\n") if w],
         previous_urls=_previous_urls(m["id"]),
     )
+
+
+def _audio_label(m: dict, compressed: bool | None = None) -> str | None:
+    if not m.get("base_path"):
+        return None
+    if compressed is None:
+        compressed = str(m.get("mic_wav") or m.get("system_wav") or "").endswith(".flac")
+    return m["base_path"] + (".*.flac" if compressed else ".*.wav")
+
+
+def _compress_audio(meeting_id: str, m: dict) -> None:
+    """Swap the meeting's wavs for lossless FLAC. Failures keep the wav and only log."""
+    moved: dict[str, str] = {}
+    for key in ("system_wav", "mic_wav"):
+        p = Path(m.get(key) or "")
+        if p.suffix == ".wav" and p.is_file():
+            try:
+                moved[key] = str(audio.compress_to_flac(p))
+            except Exception as e:
+                print(f"[scribed] compress {p.name} failed: {e}")
+    if moved:
+        DB.update_meeting(meeting_id, **moved)
 
 
 def _previous_urls(meeting_id: str) -> dict[str, str]:
@@ -155,7 +178,7 @@ def _handle_process(job: Job) -> None:
     try:
         result = process_mod.process(
             cfg(), m.get("system_wav"), m.get("mic_wav"),
-            audio_label=(m.get("base_path") or "") + ".*.wav",
+            audio_label=_audio_label(m, compressed=cfg().compress_audio),
             meeting_date=(m.get("started_at") or m["id"])[:10],
             title=m.get("title") if m.get("title_edited") else None,
             on_phase=on_phase,
@@ -180,6 +203,8 @@ def _handle_process(job: Job) -> None:
         BUS.publish("output_pushed", meeting_id=job.meeting_id, target=r.target,
                     ok=r.ok, url=r.url, detail=r.detail)
     BUS.publish("meeting_updated", meeting_id=job.meeting_id, status="done")
+    if cfg().compress_audio:
+        _compress_audio(job.meeting_id, m)
 
 
 def _handle_push(job: Job) -> None:

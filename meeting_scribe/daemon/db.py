@@ -187,6 +187,7 @@ class Database:
         for f in rec_dir.iterdir():
             name = f.name
             for suffix, key in ((".system.wav", "system_wav"), (".mic.wav", "mic_wav"),
+                                (".system.flac", "system_wav"), (".mic.flac", "mic_wav"),
                                 (".transcript.txt", "transcript_path"), (".notes.md", "notes_path")):
                 if name.endswith(suffix):
                     stamp = name[:-len(suffix)]
@@ -196,7 +197,14 @@ class Database:
 
         added = 0
         for stamp, files in sorted(bases.items()):
-            if self.get_meeting(stamp) is not None:
+            existing = self.get_meeting(stamp)
+            if existing is not None:
+                # Audio compressed outside the daemon: point the row at the .flac.
+                moved = {k: files[k] for k in ("system_wav", "mic_wav")
+                         if files.get(k) and existing.get(k) != files[k]
+                         and not Path(existing.get(k) or "").is_file()}
+                if moved:
+                    self.update_meeting(stamp, **moved)
                 continue
             wav = files.get("system_wav") or files.get("mic_wav")
             duration = audio.probe_duration_sec(Path(wav)) if wav else None

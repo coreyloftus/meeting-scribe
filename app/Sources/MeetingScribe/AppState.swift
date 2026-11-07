@@ -302,7 +302,7 @@ final class AppState: ObservableObject {
         guard let base = meeting.basePath else { return }
         let dir = (base as NSString).deletingLastPathComponent
         // Mic-only meetings have no system channel; select whichever file exists.
-        let file = [".system.wav", ".mic.wav", ".transcript.txt"].map { base + $0 }
+        let file = [".system.wav", ".mic.wav", ".system.flac", ".mic.flac", ".transcript.txt"].map { base + $0 }
             .first { FileManager.default.fileExists(atPath: $0) }
         NSWorkspace.shared.selectFile(file, inFileViewerRootedAtPath: dir)
     }
