@@ -5,6 +5,7 @@ Subcommands:
   scribe stop             Stop recording and process it
   scribe process <path>   Process an existing recording or audio file
   scribe list             List captured meetings
+  scribe compress         Convert processed recordings' wavs to lossless FLAC
   scribe daemon <cmd>     Manage the scribed background daemon
   scribe notion connect   Connect Notion in the browser (via the daemon)
   scribe doctor           Check dependencies, permissions, and config
@@ -23,6 +24,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import audio
 from . import config as config_mod
 from . import recorder
 from .client import DaemonClient, DaemonError
@@ -111,15 +113,16 @@ def _resolve_pair(path: Path) -> tuple[str | None, str | None, str]:
     s = str(path)
     # A recording base like ".../2026-06-13_10-00-00" (with .system.wav/.mic.wav siblings)
     base = s
-    for suffix in (".system.wav", ".mic.wav", ".wav"):
+    for suffix in (".system.wav", ".mic.wav", ".system.flac", ".mic.flac", ".wav", ".flac"):
         if base.endswith(suffix):
             base = base[: -len(suffix)]
             break
-    sys_wav = base + ".system.wav"
-    mic_wav = base + ".mic.wav"
-    if Path(sys_wav).is_file() or Path(mic_wav).is_file():
-        return (sys_wav if Path(sys_wav).is_file() else None,
-                mic_wav if Path(mic_wav).is_file() else None, base + ".*.wav")
+    for ext in (".wav", ".flac"):
+        sys_wav = base + ".system" + ext
+        mic_wav = base + ".mic" + ext
+        if Path(sys_wav).is_file() or Path(mic_wav).is_file():
+            return (sys_wav if Path(sys_wav).is_file() else None,
+                    mic_wav if Path(mic_wav).is_file() else None, base + ".*" + ext)
     # Otherwise treat the given file as a single mixed source.
     if path.is_file():
         return (str(path), None, str(path))
@@ -144,13 +147,53 @@ def cmd_process(args) -> int:
         print(f"No audio found at: {args.path}", file=sys.stderr)
         return 1
     try:
-        result = process(cfg, sys_wav, mic_wav, audio_label=label)
+        stamp = Path(label).name.split(".")[0]
+        result = process(cfg, sys_wav, mic_wav, audio_label=label,
+                         meeting_date=stamp[:10] if STAMP_RE.match(stamp) else None)
         for line in result.lines():
             print(f"  {line}")
     except Exception as e:
         print(f"Processing failed: {e}", file=sys.stderr)
         return 1
     return 0
+
+
+# --- compress ----------------------------------------------------------------
+
+def cmd_compress(args) -> int:
+    cfg = _load(args)
+    rec = cfg.recordings_dir
+    if not rec or not rec.is_dir():
+        print(f"No recordings dir: {rec}", file=sys.stderr)
+        return 1
+    s = recorder.load_session()
+    live = Path(s.base).name if s is not None and recorder.is_recording() else None
+    wavs, skipped = [], 0
+    for wav in sorted(rec.glob("*.wav")):
+        stamp = wav.name.split(".")[0]
+        processed = any((rec / (stamp + sfx)).is_file() for sfx in (".transcript.txt", ".txt"))
+        if stamp == live or not processed:
+            skipped += 1
+            continue
+        wavs.append(wav)
+    before = sum(w.stat().st_size for w in wavs)
+    print(f"{len(wavs)} wav(s), {before / 1e9:.1f} GB to convert; {skipped} skipped "
+          f"(unprocessed or recording).")
+    if args.dry_run or not wavs:
+        return 0
+    after, failed = 0, 0
+    for i, wav in enumerate(wavs, 1):
+        try:
+            flac = audio.compress_to_flac(wav)
+            after += flac.stat().st_size
+            print(f"  [{i}/{len(wavs)}] {flac.name}")
+        except Exception as e:
+            failed += 1
+            print(f"  [{i}/{len(wavs)}] {wav.name} kept: {e}", file=sys.stderr)
+    print(f"Done: {before / 1e9:.1f} GB -> {after / 1e9:.1f} GB, {failed} failed.")
+    if _daemon(args) is not None:
+        print("Restart the daemon (app: Start Service) so the index points at the .flac files.")
+    return 1 if failed else 0
 
 
 # --- list --------------------------------------------------------------------
@@ -166,7 +209,8 @@ def cmd_list(args) -> int:
         print("Daemon not running — showing raw recordings on disk.\n")
         cfg = _load(args)
         rec = cfg.recordings_dir
-        stamps = sorted({f.name.split(".")[0] for f in rec.glob("*.wav")}, reverse=True) \
+        stamps = sorted({f.name.split(".")[0] for f in [*rec.glob("*.wav"), *rec.glob("*.flac")]},
+                        reverse=True) \
             if rec and rec.is_dir() else []
         for s in stamps[:args.limit]:
             print(f"  · {s}")
@@ -418,6 +462,10 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("-q", "--query", help="Search title/summary")
     pl.add_argument("--local", action="store_true", help="Bypass the daemon")
     pl.set_defaults(func=cmd_list)
+
+    pz = sub.add_parser("compress", help="Convert processed recordings to lossless FLAC")
+    pz.add_argument("--dry-run", action="store_true", help="Only report what would change")
+    pz.set_defaults(func=cmd_compress)
 
     pd = sub.add_parser("daemon", help="Manage the scribed background daemon")
     pd.add_argument("daemon_command",
