@@ -209,13 +209,30 @@ class Config:
                 if self.get("outputs", k, "enabled", default=(k == "markdown"))]
 
     # --- google -------------------------------------------------------------
+    def _google_client(self) -> dict:
+        client_id = os.environ.get("GOOGLE_CLIENT_ID") or self.get("google", "client_id", default="")
+        client_secret = os.environ.get("GOOGLE_CLIENT_SECRET") or self.get("google", "client_secret", default="")
+        if client_id or client_secret:
+            return {"client_id": client_id, "client_secret": client_secret}
+        path = Path(__file__).with_name("google_oauth_client.json")
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return {}
+        client = data.get("installed") if isinstance(data, dict) else None
+        if not isinstance(client, dict):
+            return {}
+        if not all(isinstance(client.get(k), str) and client[k] for k in ("client_id", "client_secret")):
+            return {}
+        return client
+
     @property
     def google_client_id(self) -> str:
-        return os.environ.get("GOOGLE_CLIENT_ID") or self.get("google", "client_id", default="") or ""
+        return self._google_client().get("client_id") or ""
 
     @property
     def google_client_secret(self) -> str:
-        return os.environ.get("GOOGLE_CLIENT_SECRET") or self.get("google", "client_secret", default="") or ""
+        return self._google_client().get("client_secret") or ""
 
     @property
     def google_token_path(self) -> Path:

@@ -169,13 +169,31 @@ scribe start --local           # bypass the daemon entirely (original behavior)
 
 ### Google Docs & Drive outputs
 
-One-time setup: create a GCP project, enable the **Drive API**, create an
-OAuth client of type **Desktop app**, then:
+In Settings → Integrations, click **Connect Google** and approve access in your
+browser. Release packages can include the shared Meeting Scribe desktop OAuth
+client. Users do not need a Google Cloud project. `scribe google connect` uses
+the same client and browser flow.
 
-```bash
-scribe config             # put client_id/client_secret under "google" in config.json
-scribe google connect     # browser consent; token cached at ~/.config/meeting-scribe/google_token.json
-```
+Maintainer setup: create a Google Cloud OAuth client of type **Desktop app**,
+enable the Drive API, and configure the consent screen for external users.
+Download its JSON to `meeting_scribe/google_oauth_client.json` before building
+the Python distribution. The package includes this file; git ignores it.
+Desktop client credentials are public application identifiers, not server secrets.
+Never use a Web application client JSON here. Release builds must include the
+Python package with this file; rebuilding only the Swift app does not supply it.
+Publish the Google consent app and complete any required Google verification
+before distributing it beyond test users.
+
+Google uses a local browser callback supported for desktop apps, with PKCE.
+It does not need a LoftusLogic callback. Notion already uses the hosted broker
+in `broker/`; that broker can move to LoftusLogic by registering its exact
+`/api/notion/callback` URL and updating `NOTION_REDIRECT_URI` and
+`DEFAULT_BROKER_URL` together. This requires server routes, not a static page.
+
+For development or a custom Google client, expand **Advanced: use your own
+Google OAuth client** in Settings, or set `google.client_id` and
+`google.client_secret` in config. Environment variables override those values.
+Explicit credentials take precedence as a pair over the bundled client.
 
 Enable `outputs.gdrive` (md/txt file upload) and/or `outputs.gdocs` (native
 Google Doc via Drive's markdown import) in config or the app's Settings —

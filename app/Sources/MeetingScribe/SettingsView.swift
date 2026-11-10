@@ -61,8 +61,10 @@ struct IntegrationsSettings: View {
                     Label("Connected", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 } else {
-                    TextField("OAuth client ID (Desktop app)", text: $googleClientID)
-                    SecureField("OAuth client secret", text: $googleClientSecret)
+                    DisclosureGroup("Advanced: use your own Google OAuth client") {
+                        TextField("OAuth client ID (Desktop app)", text: $googleClientID)
+                        SecureField("OAuth client secret", text: $googleClientSecret)
+                    }
                     Button(connecting ? "Waiting for browser consent…" : "Connect Google") {
                         connectGoogle()
                     }
