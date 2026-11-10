@@ -24,3 +24,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["meeting_scribe", "meeting_scribe.outputs", "meeting_scribe.daemon", "meeting_scribe.integrations"]
+
+[tool.setuptools.package-data]
+meeting_scribe = ["google_oauth_client.json"]

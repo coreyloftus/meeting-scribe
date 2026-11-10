@@ -25,3 +25,6 @@ dist/
 # Swift app build artifacts (scripts/build_app.sh outputs)
 app/.build/
 app/dist/
+
+# Release Google desktop OAuth client, supplied by the maintainer.
+/meeting_scribe/google_oauth_client.json
