@@ -197,9 +197,25 @@ Complete explicit credentials take precedence over the bundled client. Partial o
 blank credentials fall back to the bundle. Use **Use shared Google client** under
 Advanced to clear saved custom credentials; remove environment overrides separately.
 
-Enable `outputs.gdrive` (md/txt file upload) and/or `outputs.gdocs` (native
-Google Doc via Drive's markdown import) in config or the app's Settings —
-they then run on every `stop` and appear as push buttons per meeting.
+In Settings → Integrations, choose **Use a Meeting Scribe folder**. The app creates
+it in My Drive, or reuses a matching folder it can access. This saves the Drive
+folder ID without enabling uploads. Google Docs keeps its separate folder setting.
+
+Choose **Summary**, **Full transcript**, and/or **Full recording (FLAC)**, then
+click **Save upload choices**. Enable **Google Drive** under **Upload automatically
+after processing** to send those files after each meeting is transcribed and summarized.
+You can also push a processed meeting manually using the same choices.
+
+Summaries and transcripts are separate files. Audio uploads include each captured
+channel as a separate FLAC file. WAV sources are converted temporarily without
+deleting the originals. Audio uploads are off by default. Upload failures appear
+in the meeting's output result; local transcripts and recordings remain available.
+Retrying a push creates new files, including files that succeeded on an earlier attempt.
+
+The config keys are `outputs.gdrive.summary`, `transcript`, and `recording`.
+The `enabled` key controls automatic uploads; `folder_id` controls their destination.
+An empty folder ID uploads to My Drive. Existing Drive users receive separate summary
+and transcript files by default. Google Docs output remains a combined native document.
 
 ---
 

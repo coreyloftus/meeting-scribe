@@ -162,6 +162,7 @@ def process(cfg: Config, system_wav: str | None, mic_wav: str | None,
                       warnings=warnings)
     if title:
         note.title = title
+    note.audio_files = [p for p in (system_wav, mic_wav) if p]
     note.previous_urls = dict(previous_urls or {})
 
     on_phase("writing_outputs", None)

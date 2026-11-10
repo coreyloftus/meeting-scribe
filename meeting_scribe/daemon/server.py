@@ -123,6 +123,7 @@ def _note_from_meeting(m: dict) -> Note:
         summary_md=m["summary_md"],
         transcript=_read_optional(m.get("transcript_path")) or "",
         audio_path=_audio_label(m),
+        audio_files=[m[k] for k in ("system_wav", "mic_wav") if m.get(k)],
         user_notes=_read_optional(m.get("notes_path")),
         warnings=[w for w in (m.get("warnings") or "").split("\n") if w],
         previous_urls=_previous_urls(m["id"]),
@@ -620,6 +621,22 @@ def google_connect():
 
     threading.Thread(target=run, name="google-connect", daemon=True).start()
     return {"ok": True, "pending": True}
+
+
+_DRIVE_FOLDER_LOCK = threading.Lock()
+
+
+@api.post("/v1/integrations/google/folder")
+def google_folder():
+    from ..integrations import google_auth
+    with _DRIVE_FOLDER_LOCK:
+        try:
+            folder_id = google_auth.meeting_folder(cfg())
+            config_mod.write_patch({"outputs": {"gdrive": {"folder_id": folder_id}}})
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Could not set up Drive folder: {e}") from e
+    BUS.publish("integrations_changed")
+    return {"id": folder_id}
 
 
 class NotionDatabaseBody(BaseModel):

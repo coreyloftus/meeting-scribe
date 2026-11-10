@@ -265,6 +265,12 @@ struct DaemonClient {
         try await get("v1/integrations", as: IntegrationsResponse.self)
     }
 
+    struct DriveFolder: Codable { var id: String }
+    func createDriveFolder() async throws -> String {
+        let data = try await request("POST", "v1/integrations/google/folder")
+        return try JSONDecoder().decode(DriveFolder.self, from: data).id
+    }
+
     func connectGoogle() async throws {
         _ = try await request("POST", "v1/integrations/google/connect")
     }

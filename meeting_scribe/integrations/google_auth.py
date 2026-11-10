@@ -149,3 +149,42 @@ def upload_file(cfg: Config, name: str, content: str, source_mime: str,
         raise GoogleAuthError(f"Drive upload failed ({r.status_code}): {r.text[:300]}")
     data = r.json()
     return data["id"], data.get("webViewLink") or f"https://drive.google.com/file/d/{data['id']}"
+
+
+def meeting_folder(cfg: Config) -> str:
+    """Reuse an accessible app folder, or create one in My Drive."""
+    s = session(cfg)
+    r = s.get('https://www.googleapis.com/drive/v3/files', params={
+        'q': "name = 'Meeting Scribe' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents",
+        'fields': 'files(id)', 'pageSize': 1}, timeout=30)
+    r.raise_for_status()
+    files = r.json().get('files', [])
+    if files:
+        return files[0]['id']
+    r = s.post('https://www.googleapis.com/drive/v3/files', params={'fields': 'id'},
+               json={'name': 'Meeting Scribe', 'mimeType': 'application/vnd.google-apps.folder'}, timeout=30)
+    r.raise_for_status()
+    return r.json()['id']
+
+
+def upload_recording(cfg: Config, path, name: str, folder_id: str | None) -> str:
+    """Stream a FLAC file through a Drive resumable upload session."""
+    s = session(cfg)
+    metadata = {'name': name}
+    if folder_id:
+        metadata['parents'] = [folder_id]
+    r = s.post('https://www.googleapis.com/upload/drive/v3/files',
+               params={'uploadType': 'resumable', 'fields': 'id,webViewLink'}, json=metadata,
+               headers={'X-Upload-Content-Type': 'audio/flac',
+                        'X-Upload-Content-Length': str(path.stat().st_size)}, timeout=30)
+    r.raise_for_status()
+    location = r.headers.get('Location', '')
+    from urllib.parse import urlparse
+    parsed = urlparse(location)
+    if parsed.scheme != 'https' or parsed.hostname != 'www.googleapis.com':
+        raise GoogleAuthError('Drive returned an invalid upload URL')
+    with path.open('rb') as stream:
+        r = s.put(location, data=stream, headers={'Content-Type': 'audio/flac'}, timeout=600)
+    r.raise_for_status()
+    data = r.json()
+    return data.get('webViewLink') or f"https://drive.google.com/file/d/{data['id']}"

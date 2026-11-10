@@ -22,6 +22,10 @@ struct IntegrationsSettings: View {
     @State private var googleClientSecret = ""
     @State private var gdriveFolder = ""
     @State private var gdocsFolder = ""
+    @State private var driveSummary = true
+    @State private var driveTranscript = true
+    @State private var driveRecording = false
+    @State private var creatingFolder = false
     @State private var connecting = false
     @State private var notionConnecting = false
     @State private var notionDatabases: [NotionDatabase] = []
@@ -30,7 +34,7 @@ struct IntegrationsSettings: View {
 
     var body: some View {
         Form {
-            Section("Auto-run on stop") {
+            Section("Upload automatically after processing") {
                 ForEach(state.integrations?.outputs ?? []) { integ in
                     Toggle(isOn: binding(for: integ)) {
                         HStack {
@@ -80,11 +84,45 @@ struct IntegrationsSettings: View {
                     }
                     .disabled(connecting)
                 }
-                TextField("Drive folder ID (optional)", text: $gdriveFolder)
-                TextField("Docs folder ID (optional)", text: $gdocsFolder)
-                Button("Save Google Folders") {
-                    save(["outputs": ["gdrive": ["folder_id": gdriveFolder],
-                                      "gdocs": ["folder_id": gdocsFolder]]])
+                if state.integrations?.google.connected == true {
+                    Button(creatingFolder ? "Setting up folder…" : "Use a Meeting Scribe folder") {
+                        creatingFolder = true
+                        Task {
+                            defer { creatingFolder = false }
+                            do {
+                                guard let client = state.client else { return }
+                                gdriveFolder = try await client.createDriveFolder()
+                                message = "Meeting Scribe folder is ready. Choose what to upload below."
+                            } catch {
+                                message = "Folder setup failed: \(error.localizedDescription)"
+                            }
+                        }
+                    }
+                    .disabled(creatingFolder)
+                    Text("Creates a folder in My Drive, or uses an existing Meeting Scribe folder this app can access.")
+                        .font(.caption)
+                }
+                if !gdriveFolder.isEmpty, let url = URL(string: "https://drive.google.com/drive/folders/\(gdriveFolder)") {
+                    Link("Open upload folder", destination: url)
+                }
+                Text("Files to send to Google Drive").font(.headline)
+                Toggle("Summary", isOn: $driveSummary)
+                Toggle("Full transcript", isOn: $driveTranscript)
+                Toggle("Full recording (FLAC)", isOn: $driveRecording)
+                Text("Recording uploads include separate microphone and system audio files. Enable Google Drive above to upload after processing.")
+                    .font(.caption)
+                Button("Save upload choices") {
+                    save(["outputs": ["gdrive": ["summary": driveSummary,
+                        "transcript": driveTranscript, "recording": driveRecording]]])
+                }
+                .disabled(!driveSummary && !driveTranscript && !driveRecording)
+                DisclosureGroup("Advanced: folder IDs") {
+                    TextField("Drive folder ID (empty = My Drive)", text: $gdriveFolder)
+                    TextField("Docs folder ID (empty = My Drive)", text: $gdocsFolder)
+                    Button("Save Google Folders") {
+                        save(["outputs": ["gdrive": ["folder_id": gdriveFolder],
+                                          "gdocs": ["folder_id": gdocsFolder]]])
+                    }
                 }
             }
 
@@ -245,6 +283,10 @@ struct IntegrationsSettings: View {
         gdriveFolder = value("outputs", "gdrive", "folder_id")
         gdocsFolder = value("outputs", "gdocs", "folder_id")
         googleClientID = value("google", "client_id")
+        let drive = (config["outputs"] as? [String: Any])?["gdrive"] as? [String: Any] ?? [:]
+        driveSummary = drive["summary"] as? Bool ?? true
+        driveTranscript = drive["transcript"] as? Bool ?? true
+        driveRecording = drive["recording"] as? Bool ?? false
     }
 
     private func binding(for integ: IntegrationInfo) -> Binding<Bool> {

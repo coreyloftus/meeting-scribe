@@ -24,6 +24,8 @@ class Note:
     warnings: list[str] = field(default_factory=list)  # capture-quality caveats
     previous_urls: dict[str, str] = field(default_factory=dict)  # last good url per target, for re-push
 
+    audio_files: list[str] = field(default_factory=list)
+
     def full_markdown(self) -> str:
         parts = [
             f"# {self.title}",
