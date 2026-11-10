@@ -26,7 +26,7 @@ class Note:
 
     audio_files: list[str] = field(default_factory=list)
 
-    def full_markdown(self) -> str:
+    def full_markdown(self, include_transcript: bool = True) -> str:
         parts = [
             f"# {self.title}",
             "",
@@ -40,5 +40,6 @@ class Note:
         parts += ["", self.summary_md]
         if self.user_notes and self.user_notes.strip():
             parts += ["", "---", "", "## My Notes", "", self.user_notes.strip()]
-        parts += ["", "---", "", "## Full Transcript", "", self.transcript]
+        if include_transcript:
+            parts += ["", "---", "", "## Full Transcript", "", self.transcript]
         return "\n".join(parts)

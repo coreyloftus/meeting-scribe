@@ -21,7 +21,8 @@ def is_configured(cfg: Config) -> bool:
 def write(cfg: Config, note, options: dict | None = None) -> OutputResult:
     options = options or {}
     def setting(key, default):
-        return options.get(key, cfg.get("outputs", "gdrive", key, default=default))
+        value = options.get(key)
+        return cfg.get("outputs", "gdrive", key, default=default) if value is None else value
     ext, mime = _FORMATS.get(setting("format", "md"), _FORMATS["md"])
     folder = setting("folder_id", "") or None
     summary, transcript, recording = (setting("summary", True), setting("transcript", True),
@@ -32,7 +33,7 @@ def write(cfg: Config, note, options: dict | None = None) -> OutputResult:
     prefix = f"{note.date}-{note.slug}"
     documents = []
     if summary:
-        documents.append((f"{prefix}-summary.{ext}", f"# {note.title}\n\n{note.summary_md}" + (f"\n\n## My Notes\n\n{note.user_notes}" if note.user_notes else "")))
+        documents.append((f"{prefix}-summary.{ext}", note.full_markdown(include_transcript=False)))
     if transcript:
         documents.append((f"{prefix}-transcript.txt", note.transcript))
     for name, content in documents:
@@ -49,13 +50,20 @@ def write(cfg: Config, note, options: dict | None = None) -> OutputResult:
         for source in note.audio_files:
             path = Path(source)
             try:
-                with tempfile.TemporaryDirectory(prefix="scribe-drive-", dir=path.parent) as tmp:
-                    flac = path
-                    if path.suffix.lower() != '.flac':
+                if not path.is_file():
+                    raise ValueError("Recording file is missing; restore it before retrying.")
+                channel = path.stem.rsplit('.', 1)[-1]
+                name = f"{prefix}-{channel}.flac"
+                if path.suffix.lower() == '.flac':
+                    urls.append(google_auth.upload_recording(cfg, path, name, folder))
+                else:
+                    with tempfile.TemporaryDirectory(prefix="scribe-drive-", dir=path.parent) as tmp:
                         flac = Path(tmp) / path.with_suffix('.flac').name
                         subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-i', str(path),
                                         '-c:a', 'flac', str(flac)], check=True, capture_output=True)
-                    urls.append(google_auth.upload_recording(cfg, flac, flac.name, folder))
+                        urls.append(google_auth.upload_recording(cfg, flac, name, folder))
+            except subprocess.CalledProcessError as e:
+                failures.append(f"{path.name}: FLAC conversion failed: {e.stderr.decode(errors='replace')[-500:]}")
             except Exception as e:
                 failures.append(f"{path.name}: {e}")
     url = f"https://drive.google.com/drive/folders/{folder}" if folder and urls else (urls[0] if urls else None)

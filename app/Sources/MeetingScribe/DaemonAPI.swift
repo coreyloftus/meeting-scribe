@@ -185,10 +185,10 @@ struct DaemonClient {
     }
 
     private func request(_ method: String, _ path: String, query: [String: String] = [:],
-                         body: [String: Any]? = nil) async throws -> Data {
+                         body: [String: Any]? = nil, timeout: TimeInterval = 30) async throws -> Data {
         var req = URLRequest(url: url(path, query: query))
         req.httpMethod = method
-        req.timeoutInterval = 30
+        req.timeoutInterval = timeout
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -267,7 +267,7 @@ struct DaemonClient {
 
     struct DriveFolder: Codable { var id: String }
     func createDriveFolder() async throws -> String {
-        let data = try await request("POST", "v1/integrations/google/folder")
+        let data = try await request("POST", "v1/integrations/google/folder", timeout: 90)
         return try JSONDecoder().decode(DriveFolder.self, from: data).id
     }
 

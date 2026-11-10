@@ -186,7 +186,7 @@ def _handle_process(job: Job) -> None:
             # Reprocess re-transcribes; a retry after a failed summary may reuse the transcript.
             force_transcribe=(job.type == "reprocess"
                               and not job.options.get("reuse_transcript")),
-            previous_urls=_previous_urls(job.meeting_id))
+            previous_urls=_previous_urls(job.meeting_id), defer_drive=True)
     except Exception as e:
         DB.update_meeting(job.meeting_id, status="failed", error=str(e))
         BUS.publish("meeting_updated", meeting_id=job.meeting_id, status="failed",
@@ -206,6 +206,8 @@ def _handle_process(job: Job) -> None:
     BUS.publish("meeting_updated", meeting_id=job.meeting_id, status="done")
     if cfg().compress_audio:
         _compress_audio(job.meeting_id, m)
+    if "gdrive" in cfg().enabled_outputs():
+        JOBS.submit("push", job.meeting_id, {"target": "gdrive"})
 
 
 def _handle_push(job: Job) -> None:

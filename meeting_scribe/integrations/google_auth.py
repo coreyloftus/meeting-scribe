@@ -102,13 +102,13 @@ def connect_interactive(cfg: Config) -> dict:
     return {"email": email}
 
 
-def session(cfg: Config):
+def session(cfg: Config, max_refresh_attempts: int = 2):
     """AuthorizedSession for API calls; raises if not connected."""
     _, _, AuthorizedSession, _ = _imports()
     creds = load_credentials(cfg)
     if creds is None:
         raise GoogleAuthError("Google not connected. Run: scribe google connect")
-    return AuthorizedSession(creds)
+    return AuthorizedSession(creds, max_refresh_attempts=max_refresh_attempts)
 
 
 def is_connected(cfg: Config) -> bool:
@@ -169,7 +169,7 @@ def meeting_folder(cfg: Config) -> str:
 
 def upload_recording(cfg: Config, path, name: str, folder_id: str | None) -> str:
     """Stream a FLAC file through a Drive resumable upload session."""
-    s = session(cfg)
+    s = session(cfg, max_refresh_attempts=0)
     metadata = {'name': name}
     if folder_id:
         metadata['parents'] = [folder_id]
@@ -183,8 +183,14 @@ def upload_recording(cfg: Config, path, name: str, folder_id: str | None) -> str
     parsed = urlparse(location)
     if parsed.scheme != 'https' or parsed.hostname != 'www.googleapis.com':
         raise GoogleAuthError('Drive returned an invalid upload URL')
-    with path.open('rb') as stream:
-        r = s.put(location, data=stream, headers={'Content-Type': 'audio/flac'}, timeout=600)
+    for attempt in range(2):
+        with path.open('rb') as stream:
+            r = s.put(location, data=stream, headers={'Content-Type': 'audio/flac'}, timeout=600)
+        if r.status_code != 401 or attempt:
+            break
+        _, Request, _, _ = _imports()
+        s.credentials.refresh(Request())
+        _save_token(cfg, s.credentials)
     r.raise_for_status()
     data = r.json()
     return data.get('webViewLink') or f"https://drive.google.com/file/d/{data['id']}"

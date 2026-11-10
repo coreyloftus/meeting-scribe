@@ -201,8 +201,7 @@ In Settings → Integrations, choose **Use a Meeting Scribe folder**. The app cr
 it in My Drive, or reuses a matching folder it can access. This saves the Drive
 folder ID without enabling uploads. Google Docs keeps its separate folder setting.
 
-Choose **Summary**, **Full transcript**, and/or **Full recording (FLAC)**, then
-click **Save upload choices**. Enable **Google Drive** under **Upload automatically
+Choose **Summary**, **Full transcript**, and/or **Full recording (FLAC)**, these choices save immediately. Enable **Google Drive** under **Upload automatically
 after processing** to send those files after each meeting is transcribed and summarized.
 You can also push a processed meeting manually using the same choices.
 
@@ -213,6 +212,10 @@ in the meeting's output result; local transcripts and recordings remain availabl
 Retrying a push creates new files, including files that succeeded on an earlier attempt.
 
 The config keys are `outputs.gdrive.summary`, `transcript`, and `recording`.
+In the app, Drive uploads run as a separate queued job after the summary is saved
+and local compression finishes. The queue is serial, so an active upload still delays
+later jobs. Interrupted uploads can be retried with a manual push.
+
 The `enabled` key controls automatic uploads; `folder_id` controls their destination.
 An empty folder ID uploads to My Drive. Existing Drive users receive separate summary
 and transcript files by default. Google Docs output remains a combined native document.

@@ -67,10 +67,10 @@ _SPECS: list[OutputSpec] = [
 REGISTRY: dict[str, OutputSpec] = {s.key: s for s in _SPECS}
 
 
-def write_all(cfg, note) -> list[OutputResult]:
+def write_all(cfg, note, exclude: tuple[str, ...] = ()) -> list[OutputResult]:
     """Run every output enabled in config. Never raises for a single failure."""
     return [REGISTRY[key].write(cfg, note)
-            for key in cfg.enabled_outputs() if key in REGISTRY]
+            for key in cfg.enabled_outputs() if key in REGISTRY and key not in exclude]
 
 
 def write_one(cfg, note, target: str, options: dict | None = None) -> OutputResult:

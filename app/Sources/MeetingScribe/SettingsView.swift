@@ -106,16 +106,11 @@ struct IntegrationsSettings: View {
                     Link("Open upload folder", destination: url)
                 }
                 Text("Files to send to Google Drive").font(.headline)
-                Toggle("Summary", isOn: $driveSummary)
-                Toggle("Full transcript", isOn: $driveTranscript)
-                Toggle("Full recording (FLAC)", isOn: $driveRecording)
-                Text("Recording uploads include separate microphone and system audio files. Enable Google Drive above to upload after processing.")
+                Toggle("Summary", isOn: driveChoice("summary", value: $driveSummary))
+                Toggle("Full transcript", isOn: driveChoice("transcript", value: $driveTranscript))
+                Toggle("Full recording (FLAC)", isOn: driveChoice("recording", value: $driveRecording))
+                Text("Choices save immediately. Recording uploads include separate microphone and system audio files. Enable Google Drive above to upload after processing.")
                     .font(.caption)
-                Button("Save upload choices") {
-                    save(["outputs": ["gdrive": ["summary": driveSummary,
-                        "transcript": driveTranscript, "recording": driveRecording]]])
-                }
-                .disabled(!driveSummary && !driveTranscript && !driveRecording)
                 DisclosureGroup("Advanced: folder IDs") {
                     TextField("Drive folder ID (empty = My Drive)", text: $gdriveFolder)
                     TextField("Docs folder ID (empty = My Drive)", text: $gdocsFolder)
@@ -287,6 +282,13 @@ struct IntegrationsSettings: View {
         driveSummary = drive["summary"] as? Bool ?? true
         driveTranscript = drive["transcript"] as? Bool ?? true
         driveRecording = drive["recording"] as? Bool ?? false
+    }
+
+    private func driveChoice(_ key: String, value: Binding<Bool>) -> Binding<Bool> {
+        Binding(get: { value.wrappedValue }, set: { enabled in
+            value.wrappedValue = enabled
+            save(["outputs": ["gdrive": [key: enabled]]])
+        })
     }
 
     private func binding(for integ: IntegrationInfo) -> Binding<Bool> {
