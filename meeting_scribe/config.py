@@ -212,7 +212,9 @@ class Config:
     def _google_client(self) -> dict:
         client_id = os.environ.get("GOOGLE_CLIENT_ID") or self.get("google", "client_id", default="")
         client_secret = os.environ.get("GOOGLE_CLIENT_SECRET") or self.get("google", "client_secret", default="")
-        if client_id or client_secret:
+        client_id = client_id.strip() if isinstance(client_id, str) else ""
+        client_secret = client_secret.strip() if isinstance(client_secret, str) else ""
+        if client_id and client_secret:
             return {"client_id": client_id, "client_secret": client_secret}
         path = Path(__file__).with_name("google_oauth_client.json")
         try:

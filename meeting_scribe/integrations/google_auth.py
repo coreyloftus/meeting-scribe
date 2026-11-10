@@ -4,9 +4,8 @@ One-time connect: `scribe google connect` (or Settings → Connect Google in the
 app) opens a browser consent page; the refresh token is cached at
 config `google.token_path` (chmod 600) and refreshed automatically after that.
 
-Needs a GCP project with the Drive API (and Docs API for gdocs viewing) enabled
-and an OAuth client of type "Desktop app" — put its id/secret in config
-`google.client_id` / `google.client_secret` (env GOOGLE_CLIENT_ID/SECRET win).
+Uses the shared desktop OAuth client bundled with the Python package, or a
+custom client from config google.client_id / google.client_secret.
 
 Scopes: `drive.file` only sees files this app created — least privilege that
 still lets us upload notes. `userinfo.email` is just to show which account is
@@ -45,9 +44,8 @@ def _imports():
 def _client_config(cfg: Config) -> dict:
     if not (cfg.google_client_id and cfg.google_client_secret):
         raise GoogleAuthError(
-            "No Google OAuth client configured. Create a 'Desktop app' OAuth client "
-            "in your GCP project (Drive API enabled) and set google.client_id / "
-            "google.client_secret in config.json.")
+            "This installation has no Google OAuth client. Install a release with a "
+            "shared client or add a desktop client under Advanced in Settings.")
     return {"installed": {
         "client_id": cfg.google_client_id,
         "client_secret": cfg.google_client_secret,

@@ -61,9 +61,19 @@ struct IntegrationsSettings: View {
                     Label("Connected", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 } else {
+                    if state.integrations?.google.clientConfigured == false {
+                        Text("This installation has no Google client. Add a desktop client under Advanced, or install a release with a shared client.")
+                            .font(.caption)
+                    }
                     DisclosureGroup("Advanced: use your own Google OAuth client") {
                         TextField("OAuth client ID (Desktop app)", text: $googleClientID)
                         SecureField("OAuth client secret", text: $googleClientSecret)
+                        Button("Use shared Google client") {
+                            googleClientID = ""
+                            googleClientSecret = ""
+                            save(["google": ["client_id": NSNull(), "client_secret": NSNull()]])
+                        }
+                        Text("Environment overrides must be removed separately.").font(.caption)
                     }
                     Button(connecting ? "Waiting for browser consent…" : "Connect Google") {
                         connectGoogle()
