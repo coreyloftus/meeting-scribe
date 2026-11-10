@@ -602,8 +602,8 @@ def google_connect():
     c = cfg()
     if not (c.google_client_id and c.google_client_secret):
         raise HTTPException(status_code=409,
-                            detail="set google.client_id and google.client_secret first "
-                                   "(GCP Desktop-app OAuth client)")
+                            detail="This installation has no Google OAuth client. Install a release "
+                                   "with a shared client or add a desktop client under Advanced in Settings.")
     from ..integrations import google_auth
     if GOOGLE_CONNECT["running"]:
         return {"ok": True, "pending": True}

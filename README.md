@@ -193,7 +193,9 @@ in `broker/`; that broker can move to LoftusLogic by registering its exact
 For development or a custom Google client, expand **Advanced: use your own
 Google OAuth client** in Settings, or set `google.client_id` and
 `google.client_secret` in config. Environment variables override those values.
-Explicit credentials take precedence as a pair over the bundled client.
+Complete explicit credentials take precedence over the bundled client. Partial or
+blank credentials fall back to the bundle. Use **Use shared Google client** under
+Advanced to clear saved custom credentials; remove environment overrides separately.
 
 Enable `outputs.gdrive` (md/txt file upload) and/or `outputs.gdocs` (native
 Google Doc via Drive's markdown import) in config or the app's Settings —
